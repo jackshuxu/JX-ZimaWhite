@@ -1,40 +1,40 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 
 @dataclass
 class ChordPayload:
-    """A triggered chord from a participant - output layer values + instrument."""
-    output: list[float]  # 10 values, one per digit (0-9)
+    """Triggered chord data - output layer + instrument."""
+
+    output: list[float]
     instrument: str
 
 
 @dataclass
 class ParticipantState:
     """State for a single participant drawing digits."""
+
     socket_id: str
     instrument: str = "pad"
     username: str = "anonymous"
-    canvas: Optional[str] = None  # base64 PNG data URL
-    output: Optional[list[float]] = None  # Latest output layer (10 values)
+    canvas: Optional[str] = None  # base64 PNG
+    output: Optional[list[float]] = None  # Latest NN output (10 values)
     last_seen: datetime = field(default_factory=datetime.utcnow)
 
 
-class SessionState:
-    """State for a single session (one QR code = one session)."""
+class GlobalState:
+    """Single-show state shared by everyone."""
 
-    def __init__(self, session_id: str):
-        self.session_id = session_id
+    def __init__(self):
         self.participants: dict[str, ParticipantState] = {}
-        self.conductor_socket_id: Optional[str] = None  # Single conductor (the host)
+        self.conductor_socket_id: Optional[str] = None
 
     def serialize(self) -> dict:
-        """Convert to JSON-serializable dict for sending over WebSocket."""
+        """JSON snapshot for frontend consumers."""
         return {
-            "sessionId": self.session_id,
             "participants": [
                 {
                     "socketId": p.socket_id,
@@ -45,12 +45,18 @@ class SessionState:
                 }
                 for p in self.participants.values()
             ],
-            "hasConductor": self.conductor_socket_id is not None,
             "participantCount": len(self.participants),
+            "hasConductor": self.conductor_socket_id is not None,
+            "instrumentMix": self.instrument_mix(),
         }
 
+    def instrument_mix(self) -> dict[str, int]:
+        mix: dict[str, int] = {}
+        for participant in self.participants.values():
+            mix[participant.instrument] = mix.get(participant.instrument, 0) + 1
+        return mix
+
     def get_participant_chord(self, socket_id: str) -> Optional[ChordPayload]:
-        """Get a participant's current output as a chord for triggering."""
         participant = self.participants.get(socket_id)
         if not participant or not participant.output:
             return None
@@ -61,58 +67,37 @@ class SessionState:
 
 
 class SessionManager:
-    """Manages all active sessions."""
+    """
+    Maintains global participant + conductor state for the single show.
+    (Name kept for compatibility with earlier code.)
+    """
 
     def __init__(self):
-        self.sessions: dict[str, SessionState] = {}
+        self.state = GlobalState()
 
-    def _get_or_create(self, session_id: str) -> SessionState:
-        if session_id not in self.sessions:
-            self.sessions[session_id] = SessionState(session_id)
-        return self.sessions[session_id]
-
+    # ---------------------------------------------------------------- participants
     def join_participant(
         self,
-        session_id: str,
         socket_id: str,
         instrument: str,
         username: str,
-    ) -> SessionState:
-        """Add a participant to a session."""
-        session = self._get_or_create(session_id)
-        session.participants[socket_id] = ParticipantState(
+    ) -> None:
+        self.state.participants[socket_id] = ParticipantState(
             socket_id=socket_id,
             instrument=instrument,
             username=username or "anonymous",
         )
-        return session
-
-    def join_conductor(self, session_id: str, socket_id: str) -> tuple[SessionState, bool]:
-        """
-        Set the conductor for a session.
-        Returns (session, success). Success is False if a conductor already exists.
-        """
-        session = self._get_or_create(session_id)
-        if session.conductor_socket_id is not None:
-            return session, False  # Already has a conductor
-        session.conductor_socket_id = socket_id
-        return session, True
 
     def update_participant(
         self,
-        session_id: str,
         socket_id: str,
         canvas: Optional[str] = None,
         output: Optional[list[float]] = None,
         instrument: Optional[str] = None,
-    ) -> Optional[SessionState]:
-        """Update a participant's canvas/output."""
-        session = self.sessions.get(session_id)
-        if not session:
-            return None
-        participant = session.participants.get(socket_id)
+    ) -> bool:
+        participant = self.state.participants.get(socket_id)
         if not participant:
-            return None
+            return False
         if canvas is not None:
             participant.canvas = canvas
         if output is not None:
@@ -120,36 +105,48 @@ class SessionManager:
         if instrument is not None:
             participant.instrument = instrument
         participant.last_seen = datetime.utcnow()
-        return session
+        return True
 
-    def get_chord_for_trigger(
-        self,
-        session_id: str,
-        socket_id: str,
-    ) -> Optional[ChordPayload]:
-        """Get a participant's chord data when they press the trigger."""
-        session = self.sessions.get(session_id)
-        if not session:
-            return None
-        return session.get_participant_chord(socket_id)
+    def get_chord_for_trigger(self, socket_id: str) -> Optional[ChordPayload]:
+        return self.state.get_participant_chord(socket_id)
 
-    def leave(self, socket_id: str) -> list[str]:
-        """Remove a socket from all sessions. Returns affected session IDs."""
-        touched: set[str] = set()
-        for session_id, session in list(self.sessions.items()):
-            if socket_id in session.participants:
-                del session.participants[socket_id]
-                touched.add(session_id)
-            if session.conductor_socket_id == socket_id:
-                session.conductor_socket_id = None
-                touched.add(session_id)
-            # Clean up empty sessions
-            if not session.participants and session.conductor_socket_id is None:
-                del self.sessions[session_id]
-        return list(touched)
+    def get_participant(self, socket_id: str) -> Optional[ParticipantState]:
+        return self.state.participants.get(socket_id)
 
-    def snapshot(self, session_id: str) -> Optional[dict]:
-        """Get serialized snapshot of a session."""
-        if session_id not in self.sessions:
-            return None
-        return self.sessions[session_id].serialize()
+    # ---------------------------------------------------------------- conductor
+    def join_conductor(self, socket_id: str) -> bool:
+        """Returns True if conductor slot granted, False if already taken."""
+        if self.state.conductor_socket_id and self.state.conductor_socket_id != socket_id:
+            return False
+        self.state.conductor_socket_id = socket_id
+        return True
+
+    # ---------------------------------------------------------------- teardown
+    def leave(self, socket_id: str) -> bool:
+        """
+        Remove a socket from the show.
+        Returns True if the public snapshot changed.
+        """
+        changed = False
+        if socket_id in self.state.participants:
+            del self.state.participants[socket_id]
+            changed = True
+        if self.state.conductor_socket_id == socket_id:
+            self.state.conductor_socket_id = None
+            changed = True
+        return changed
+
+    # ---------------------------------------------------------------- cleanup
+    def remove_inactive(self, timeout_sec: float) -> int:
+        """Remove participants idle longer than timeout_sec. Returns count removed."""
+        cutoff = datetime.utcnow() - timedelta(seconds=timeout_sec)
+        to_remove = [
+            sid for sid, p in self.state.participants.items() if p.last_seen < cutoff
+        ]
+        for sid in to_remove:
+            del self.state.participants[sid]
+        return len(to_remove)
+
+    # ---------------------------------------------------------------- snapshots
+    def snapshot(self) -> dict:
+        return self.state.serialize()
