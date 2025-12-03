@@ -17,5 +17,5 @@ from django.core.asgi import get_asgi_application
 from core.socket_server import sio
 
 django_app = get_asgi_application()
-socket_app = socketio.ASGIApp(sio, django_app)
+socket_app = socketio.ASGIApp(sio, django_app, socketio_path="/ws/socket.io")
 application = socket_app
