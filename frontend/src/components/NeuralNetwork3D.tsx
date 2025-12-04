@@ -12,8 +12,8 @@ type Props = {
     hidden2?: LayerActivations;
     output?: LayerActivations;
   };
-  bloomEnvelope?: number; // 0-1, envelope triggered by sounds
-  bloomLfo?: number; // 0-1, LFO modulation within envelope
+  hiddenBloom?: number; // 0-1, bloom for hidden layers (pad/lead)
+  outputBloom?: number; // 0-1, bloom for output layer (arp)
 };
 
 // Neuron structure: group containing fill mesh, edge wireframe, and optional glow sprite
@@ -69,8 +69,8 @@ function getOutputColor(digitIndex: number): THREE.Color {
  */
 export function NeuralNetwork3D({
   layers,
-  bloomEnvelope = 0,
-  bloomLfo = 0,
+  hiddenBloom = 0,
+  outputBloom = 0,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -177,18 +177,15 @@ export function NeuralNetwork3D({
       normalize(output),
     ];
 
-    // Bloom modulation: envelope gates the bloom, LFO modulates within envelope
-    // When envelope > 0, bloom is active and follows LFO curve
-    // Base bloom = envelope * (0.5 + 0.5 * lfo) for pulsing effect
-    const bloomModulation =
-      bloomEnvelope > 0.01 ? bloomEnvelope * (0.5 + bloomLfo * 0.5) : 0;
-
     // Update neurons
     layerActivations.forEach((activation, layerIndex) => {
       const neurons = layerRefs.current[layerIndex];
       if (!neurons) return;
       const isOutputLayer = layerIndex === 3;
       const isInputLayer = layerIndex === 0;
+
+      // Use appropriate bloom for each layer type
+      const bloomModulation = isOutputLayer ? outputBloom : hiddenBloom;
 
       activation.forEach((value, idx) => {
         const neuron = neurons[idx];
@@ -221,23 +218,23 @@ export function NeuralNetwork3D({
         const glow = neuron.userData.glowSprite;
         if (glow && !isInputLayer) {
           const baseSize = neuron.userData.baseSize;
-          // Base bloom from activation
-          const activationBloom = value * value;
+          // Base bloom from activation (less aggressive squaring for visibility)
+          const activationBloom = Math.pow(value, 1.5);
 
           if (bloomModulation > 0.01 && activationBloom > 0.01) {
-            // When sound is playing: bloom pulses with envelope + LFO
+            // When sound is playing: bloom pulses dramatically with envelope + LFO
             const glowScale =
               baseSize *
-              (2 + activationBloom * 6 * (0.8 + bloomModulation * 0.4));
+              (3 + activationBloom * 10 * (0.7 + bloomModulation * 0.6));
             glow.scale.set(glowScale, glowScale, 1);
             const glowOpacity =
-              activationBloom * 0.7 * (0.3 + bloomModulation * 0.7);
+              activationBloom * 0.9 * (0.4 + bloomModulation * 0.6);
             (glow.material as THREE.SpriteMaterial).opacity = glowOpacity;
           } else {
-            // No sound: minimal static bloom based on activation only
-            const glowScale = baseSize * (2 + activationBloom * 4);
+            // No sound: subtle static bloom based on activation only
+            const glowScale = baseSize * (2 + activationBloom * 5);
             glow.scale.set(glowScale, glowScale, 1);
-            const glowOpacity = activationBloom * 0.3; // Dimmer when no sound
+            const glowOpacity = activationBloom * 0.4; // Slightly visible when no sound
             (glow.material as THREE.SpriteMaterial).opacity = glowOpacity;
           }
           (glow.material as THREE.SpriteMaterial).color.copy(boostedColor);
@@ -269,7 +266,7 @@ export function NeuralNetwork3D({
       conn.line.material.opacity = Math.max(0.05, avgActivation * 0.7);
       conn.line.material.color.copy(boostedColor);
     });
-  }, [layers, bloomEnvelope, bloomLfo]);
+  }, [layers, hiddenBloom, outputBloom]);
 
   return (
     <div

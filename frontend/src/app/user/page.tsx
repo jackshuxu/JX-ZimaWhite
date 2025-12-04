@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { DrawingCanvas } from "@/components/DrawingCanvas";
-import { NeuralNetwork3D } from "@/components/NeuralNetwork3D";
-import { TriggerButton } from "@/components/TriggerButton";
 import { useNetwork } from "@/hooks/useNetwork";
 import { getSocket } from "@/lib/socket";
 import { INSTRUMENTS, type Instrument } from "@/types/network";
 
 export default function UserPage() {
+  const router = useRouter();
   const [inputArr, setInputArr] = useState<number[]>(Array(784).fill(0));
   const [canvasData, setCanvasData] = useState<string | null>(null);
   const { activations } = useNetwork(inputArr);
@@ -17,6 +17,22 @@ export default function UserPage() {
   const [instrument, setInstrument] = useState<Instrument>("pad");
   const [connected, setConnected] = useState(false);
   const [lastTrigger, setLastTrigger] = useState<number | null>(null);
+  const [isReady, setIsReady] = useState(false);
+  const [drawMode, setDrawMode] = useState<"pen" | "erase">("pen");
+  const [triggerFlash, setTriggerFlash] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement & { clearCanvas?: () => void }>(null);
+
+  // Check for nickname from auth page on mount
+  useEffect(() => {
+    const storedNickname = localStorage.getItem("mnist_nickname");
+    if (!storedNickname) {
+      // Redirect to auth page if no nickname
+      router.push("/user/auth");
+      return;
+    }
+    setUsername(storedNickname);
+    setIsReady(true);
+  }, [router]);
 
   const lastCanvasEmitRef = useRef(0);
   const socket = useMemo(() => getSocket(), []);
@@ -71,50 +87,46 @@ export default function UserPage() {
 
   // Handle chord trigger
   const handleTrigger = useCallback(() => {
-    if (!activations) return;
+    if (!activations || triggerFlash) return;
     socket.emit("chord:trigger", {
       output: activations.output,
       instrument,
     });
-  }, [activations, instrument, socket]);
+    setTriggerFlash(true);
+    setTimeout(() => setTriggerFlash(false), 150);
+  }, [activations, instrument, socket, triggerFlash]);
 
-  // Prediction
-  const prediction = useMemo(() => {
-    if (!activations?.output?.length) return null;
-    const max = Math.max(...activations.output);
-    const idx = activations.output.indexOf(max);
-    return { digit: idx, confidence: max };
-  }, [activations]);
+  // Handle canvas clear
+  const handleClear = useCallback(() => {
+    // Canvas clears itself, this is just for any additional logic
+  }, []);
 
-  // Flash feedback on trigger
+  // Flash feedback on trigger (unused but kept for potential future use)
   const isRecentTrigger = lastTrigger && Date.now() - lastTrigger < 500;
 
+  // Show loading state while checking auth
+  if (!isReady) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-black text-white">
+        <div className="text-xs uppercase tracking-[0.5em] text-gray-500 animate-pulse">
+          Loading...
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-black text-white">
-      <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 py-6">
+    <main className="min-h-screen bg-black text-white flex flex-col items-center">
+      <div className="flex flex-col items-center gap-4 px-4 py-4">
         {/* Header */}
         <header className="text-center">
           <p className="text-xs uppercase tracking-[0.5em] text-gray-500">
             MNIST ORCHESTRA
           </p>
           <h1 className="mt-1 text-xl font-bold uppercase tracking-widest">
-            Participant
+            {username}
           </h1>
         </header>
-
-        {/* Username input */}
-        <div className="space-y-2">
-          <label className="text-xs uppercase tracking-widest text-gray-500">
-            Your Name
-          </label>
-          <input
-            type="text"
-            className="w-full border border-white/20 bg-transparent px-4 py-3 text-sm uppercase tracking-widest placeholder:text-gray-600 focus:border-white focus:outline-none"
-            placeholder="ANONYMOUS"
-            value={username}
-            onChange={(e) => setUsername(e.target.value.slice(0, 12))}
-          />
-        </div>
 
         {/* Instrument picker */}
         <div className="space-y-2">
@@ -138,67 +150,86 @@ export default function UserPage() {
           </div>
         </div>
 
-        {/* Canvas */}
+        {/* Canvas box with controls - width matches canvas (280px + padding) */}
         <div
-          className={`border p-4 transition-all ${
+          className={`relative border p-3 transition-all ${
             isRecentTrigger
               ? "border-white bg-white/5"
               : "border-white/10 bg-transparent"
           }`}
+          style={{ width: "fit-content" }}
         >
-          <DrawingCanvas
-            width={280}
-            height={280}
-            onChange={setInputArr}
-            onCanvasImage={setCanvasData}
-          />
-        </div>
+          {/* Top row: Draw/Erase/Clear buttons */}
+          <div className="mb-2 flex gap-2">
+            {(["pen", "erase"] as const).map((tool) => (
+              <button
+                key={tool}
+                onClick={() => setDrawMode(tool)}
+                className={`border px-3 py-1 text-xs uppercase tracking-widest transition-colors ${
+                  drawMode === tool
+                    ? "border-white bg-white text-black"
+                    : "border-white/40 text-white hover:border-white"
+                }`}
+              >
+                {tool === "pen" ? "DRAW" : "ERASE"}
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+                if (canvas) {
+                  const ctx = canvas.getContext("2d");
+                  if (ctx) {
+                    ctx.fillStyle = "#000000";
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    setInputArr(Array(784).fill(0));
+                    setCanvasData(null);
+                  }
+                }
+              }}
+              className="border border-red-500/60 px-3 py-1 text-xs uppercase tracking-widest text-red-300 transition-colors hover:bg-red-500 hover:text-black"
+            >
+              CLEAR
+            </button>
+          </div>
 
-        {/* Prediction */}
-        {prediction && (
-          <div className="flex items-center justify-between border border-white/10 p-4">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-gray-500">
-                Detected
-              </p>
-              <p className="text-3xl font-bold">{prediction.digit}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs uppercase tracking-widest text-gray-500">
-                Confidence
-              </p>
-              <p className="text-xl">
-                {(prediction.confidence * 100).toFixed(0)}%
-              </p>
+          {/* Canvas */}
+          <div style={{ width: 280 }}>
+            <DrawingCanvas
+              width={280}
+              height={280}
+              onChange={setInputArr}
+              onCanvasImage={setCanvasData}
+              hideButtons
+              externalMode={drawMode}
+              onClear={handleClear}
+            />
+
+            {/* Bottom row: Status + Play */}
+            <div className="mt-2 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    connected ? "bg-green-500" : "bg-red-500"
+                  }`}
+                />
+                <span className="uppercase tracking-widest">
+                  {connected ? "Connected" : "Connecting..."}
+                </span>
+              </div>
+              <button
+                onClick={handleTrigger}
+                disabled={!connected || triggerFlash}
+                className={`border px-4 py-2 text-xs uppercase tracking-widest transition-colors flex items-center gap-1 ${
+                  triggerFlash
+                    ? "border-white bg-white text-black"
+                    : "border-white/60 text-white hover:border-white hover:bg-white/10"
+                } ${!connected ? "opacity-30 cursor-not-allowed" : ""}`}
+              >
+                PLAY <span className="text-sm">→</span>
+              </button>
             </div>
           </div>
-        )}
-
-        {/* 3D Preview (smaller) */}
-        <div className="h-48 border border-white/10">
-          <NeuralNetwork3D
-            layers={{
-              input: inputArr,
-              hidden1: activations?.hidden1,
-              hidden2: activations?.hidden2,
-              output: activations?.output,
-            }}
-          />
-        </div>
-
-        {/* Trigger button */}
-        <TriggerButton onTrigger={handleTrigger} disabled={!connected} />
-
-        {/* Status */}
-        <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              connected ? "bg-green-500" : "bg-red-500"
-            }`}
-          />
-          <span className="uppercase tracking-widest">
-            {connected ? "Connected" : "Connecting..."}
-          </span>
         </div>
       </div>
     </main>

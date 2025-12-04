@@ -77,3 +77,61 @@ canvas {
 .animate-glow {
   animation: glow-pulse 0.4s ease-out;
 }
+
+/* ========== Auth Page Bloom Effects ========== */
+
+/* Bloom / Glow effects */
+.bloom-text {
+  text-shadow:
+    0 0 10px rgba(255, 255, 255, 0.8),
+    0 0 20px rgba(255, 255, 255, 0.6),
+    0 0 30px rgba(255, 255, 255, 0.4),
+    0 0 40px rgba(255, 255, 255, 0.2);
+}
+
+.bloom-text-subtle {
+  text-shadow:
+    0 0 5px rgba(255, 255, 255, 0.3),
+    0 0 10px rgba(255, 255, 255, 0.2);
+}
+
+.bloom-input {
+  box-shadow:
+    0 0 10px rgba(255, 255, 255, 0.1),
+    0 0 20px rgba(255, 255, 255, 0.05),
+    inset 0 0 10px rgba(255, 255, 255, 0.03);
+  transition: box-shadow 0.3s ease;
+}
+
+.bloom-input:focus {
+  box-shadow:
+    0 0 15px rgba(255, 255, 255, 0.3),
+    0 0 30px rgba(255, 255, 255, 0.15),
+    0 0 45px rgba(255, 255, 255, 0.08),
+    inset 0 0 15px rgba(255, 255, 255, 0.05);
+}
+
+.bloom-button {
+  box-shadow:
+    0 0 10px rgba(255, 255, 255, 0.15),
+    0 0 20px rgba(255, 255, 255, 0.08);
+  transition: box-shadow 0.3s ease, background 0.3s ease, color 0.3s ease;
+}
+
+.bloom-button:hover {
+  box-shadow:
+    0 0 20px rgba(255, 255, 255, 0.5),
+    0 0 40px rgba(255, 255, 255, 0.3),
+    0 0 60px rgba(255, 255, 255, 0.15);
+}
+
+.bloom-line {
+  box-shadow:
+    0 0 10px rgba(255, 255, 255, 0.5),
+    0 0 20px rgba(255, 255, 255, 0.3);
+}
+
+.bloom-svg {
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5))
+    drop-shadow(0 0 6px rgba(255, 255, 255, 0.3));
+}

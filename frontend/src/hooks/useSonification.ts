@@ -92,8 +92,8 @@ type SonificationOptions = {
 type SonificationState = {
   isPlaying: boolean;
   audioContextState: AudioContextState | null;
-  bloomEnvelope: number;
-  bloomLfo: number;
+  hiddenBloom: number; // Bloom for hidden layers (pad/lead)
+  outputBloom: number; // Bloom for output layer (arp)
 };
 
 export function useSonification(
@@ -130,13 +130,13 @@ export function useSonification(
   const lastArpTriggerRef = useRef<number>(0);
 
   // Bloom values ref (avoid setState every frame)
-  const bloomValuesRef = useRef({ envelope: 0, lfo: 0 });
+  const bloomValuesRef = useRef({ hidden: 0, output: 0 });
 
   const [state, setState] = useState<SonificationState>({
     isPlaying: false,
     audioContextState: null,
-    bloomEnvelope: 0,
-    bloomLfo: 0,
+    hiddenBloom: 0,
+    outputBloom: 0,
   });
 
   // Keep data refs updated
@@ -351,6 +351,7 @@ export function useSonification(
 
   /**
    * Schedule a soft bell note with cleanup tracking
+   * Also retriggers the arp envelope when each note plays
    */
   const createScheduledBell = useCallback(
     (freq: number, amp: number, delayTime: number) => {
@@ -359,6 +360,8 @@ export function useSonification(
       const timeoutId = setTimeout(() => {
         scheduledBellsRef.current.delete(timeoutId);
         createSoftBellVoice(freq, amp);
+        // Retrigger arp envelope when each note plays (keeps bloom alive)
+        lastArpTriggerRef.current = performance.now();
       }, delayTime * 1000);
 
       scheduledBellsRef.current.add(timeoutId);
@@ -544,38 +547,49 @@ export function useSonification(
     const animate = (timestamp: number) => {
       const now = performance.now();
 
-      // Compute envelope values
+      // Compute separate envelope values for hidden vs output layers
       const leadEnv = computeEnvelope(
         lastLeadTriggerRef.current,
         LEAD_DURATION
       );
       const padEnv = computeEnvelope(lastPadTriggerRef.current, PAD_DURATION);
       const arpEnv = computeEnvelope(lastArpTriggerRef.current, LEAD_DURATION);
-      const bloomEnvelope = Math.max(leadEnv, padEnv, arpEnv);
 
-      // Compute LFO
-      let bloomLfo = 0;
-      if (bloomEnvelope > 0.01) {
-        const mostRecentTrigger = Math.max(
+      // Hidden layers: respond to pad/lead only (dimmer)
+      const hiddenEnv = Math.max(leadEnv, padEnv) * 0.3;
+
+      // Compute LFO for hidden layers
+      let hiddenLfo = 0;
+      if (hiddenEnv > 0.01) {
+        const hiddenTrigger = Math.max(
           lastLeadTriggerRef.current,
-          lastPadTriggerRef.current,
-          lastArpTriggerRef.current
+          lastPadTriggerRef.current
         );
-        const lfoElapsed = (now - mostRecentTrigger) / 1000;
+        const lfoElapsed = (now - hiddenTrigger) / 1000;
         const phase = (lfoElapsed * LFO_RATE) % 1;
-        bloomLfo = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+        hiddenLfo = phase < 0.5 ? phase * 2 : 2 - phase * 2;
       }
+      const hiddenBloom = hiddenEnv * (0.6 + hiddenLfo * 0.4);
+
+      // Output layer: respond to arp only (full brightness)
+      let outputLfo = 0;
+      if (arpEnv > 0.01) {
+        const lfoElapsed = (now - lastArpTriggerRef.current) / 1000;
+        const phase = (lfoElapsed * LFO_RATE) % 1;
+        outputLfo = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+      }
+      const outputBloom = arpEnv * (0.6 + outputLfo * 0.4);
 
       // Store in ref (always updated)
-      bloomValuesRef.current = { envelope: bloomEnvelope, lfo: bloomLfo };
+      bloomValuesRef.current = { hidden: hiddenBloom, output: outputBloom };
 
       // Throttle React state updates
       if (timestamp - lastUpdate > UPDATE_INTERVAL) {
         lastUpdate = timestamp;
         setState((prev) => ({
           ...prev,
-          bloomEnvelope,
-          bloomLfo,
+          hiddenBloom,
+          outputBloom,
         }));
       }
 
@@ -593,8 +607,8 @@ export function useSonification(
       cancelAnimationFrame(animationRef.current);
       animationRef.current = null;
     }
-    bloomValuesRef.current = { envelope: 0, lfo: 0 };
-    setState((prev) => ({ ...prev, bloomEnvelope: 0, bloomLfo: 0 }));
+    bloomValuesRef.current = { hidden: 0, output: 0 };
+    setState((prev) => ({ ...prev, hiddenBloom: 0, outputBloom: 0 }));
   }, []);
 
   /**
@@ -606,8 +620,8 @@ export function useSonification(
         setState({
           isPlaying: true,
           audioContextState: audioCtxRef.current?.state ?? null,
-          bloomEnvelope: 0,
-          bloomLfo: 0,
+          hiddenBloom: 0,
+          outputBloom: 0,
         });
 
         startAnimation();
@@ -635,8 +649,8 @@ export function useSonification(
       setState({
         isPlaying: false,
         audioContextState: audioCtxRef.current?.state ?? null,
-        bloomEnvelope: 0,
-        bloomLfo: 0,
+        hiddenBloom: 0,
+        outputBloom: 0,
       });
     }
 

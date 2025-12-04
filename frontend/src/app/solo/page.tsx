@@ -94,7 +94,7 @@ export default function SoloPage() {
   }, [activations, canvasEmpty]);
 
   // Web Audio sonification
-  const { isPlaying, bloomEnvelope, bloomLfo } = useSonification(
+  const { isPlaying, hiddenBloom, outputBloom } = useSonification(
     displayActivations?.hidden1 ?? null,
     displayActivations?.hidden2 ?? null,
     displayActivations?.output ?? null,
@@ -112,8 +112,8 @@ export default function SoloPage() {
             hidden2: displayActivations?.hidden2,
             output: displayActivations?.output,
           }}
-          bloomEnvelope={bloomEnvelope}
-          bloomLfo={bloomLfo}
+          hiddenBloom={hiddenBloom}
+          outputBloom={outputBloom}
         />
       </div>
 

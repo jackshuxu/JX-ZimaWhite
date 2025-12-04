@@ -13,6 +13,10 @@ type Props = {
   height?: number;
   onChange?: (input: number[]) => void;
   onCanvasImage?: (dataUrl: string | null) => void;
+  hideButtons?: boolean;
+  onModeChange?: (mode: "pen" | "erase") => void;
+  onClear?: () => void;
+  externalMode?: "pen" | "erase";
 };
 
 const DEFAULT_SIZE = 320;
@@ -23,14 +27,27 @@ export function DrawingCanvas({
   height = DEFAULT_SIZE,
   onChange,
   onCanvasImage,
+  hideButtons = false,
+  onModeChange,
+  onClear,
+  externalMode,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const smallRef = useRef<HTMLCanvasElement | null>(null);
   const smallCtxRef = useRef<CanvasRenderingContext2D | null>(null);
-  const [mode, setMode] = useState<"pen" | "erase">("pen");
+  const [internalMode, setInternalMode] = useState<"pen" | "erase">("pen");
+  const mode = externalMode ?? internalMode;
   const drawing = useRef(false);
   const lastEmitRef = useRef(0);
   const pendingEmitRef = useRef<number | null>(null);
+
+  const setMode = useCallback(
+    (newMode: "pen" | "erase") => {
+      setInternalMode(newMode);
+      onModeChange?.(newMode);
+    },
+    [onModeChange]
+  );
 
   // Store callbacks in refs to avoid dependency issues
   const onChangeRef = useRef(onChange);
@@ -162,31 +179,43 @@ export function DrawingCanvas({
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     emitInputImmediate();
     onCanvasImageRef.current?.(null);
-  }, [emitInputImmediate]);
+    onClear?.();
+  }, [emitInputImmediate, onClear]);
+
+  // Expose clearCanvas for external use
+  useEffect(() => {
+    if (hideButtons && canvasRef.current) {
+      (
+        canvasRef.current as HTMLCanvasElement & { clearCanvas?: () => void }
+      ).clearCanvas = clearCanvas;
+    }
+  }, [hideButtons, clearCanvas]);
 
   return (
-    <div className="space-y-3">
-      <div className="flex gap-2">
-        {(["pen", "erase"] as const).map((tool) => (
+    <div className={hideButtons ? "" : "space-y-3"}>
+      {!hideButtons && (
+        <div className="flex gap-2">
+          {(["pen", "erase"] as const).map((tool) => (
+            <button
+              key={tool}
+              onClick={() => setMode(tool)}
+              className={`border px-3 py-1 text-xs uppercase tracking-widest transition-colors ${
+                mode === tool
+                  ? "border-white bg-white text-black"
+                  : "border-white/40 text-white hover:border-white"
+              }`}
+            >
+              {tool === "pen" ? "DRAW" : "ERASE"}
+            </button>
+          ))}
           <button
-            key={tool}
-            onClick={() => setMode(tool)}
-            className={`border px-3 py-1 text-xs uppercase tracking-widest transition-colors ${
-              mode === tool
-                ? "border-white bg-white text-black"
-                : "border-white/40 text-white hover:border-white"
-            }`}
+            onClick={clearCanvas}
+            className="border border-red-500/60 px-3 py-1 text-xs uppercase tracking-widest text-red-300 transition-colors hover:bg-red-500 hover:text-black"
           >
-            {tool === "pen" ? "DRAW" : "ERASE"}
+            CLEAR
           </button>
-        ))}
-        <button
-          onClick={clearCanvas}
-          className="border border-red-500/60 px-3 py-1 text-xs uppercase tracking-widest text-red-300 transition-colors hover:bg-red-500 hover:text-black"
-        >
-          CLEAR
-        </button>
-      </div>
+        </div>
+      )}
       <canvas
         ref={canvasRef}
         className="border border-white/20 bg-black shadow-[0_0_60px_rgba(255,255,255,0.05)]"
