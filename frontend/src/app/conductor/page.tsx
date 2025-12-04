@@ -15,10 +15,98 @@ import type { CrowdSnapshot, ChordPlayedEvent } from "@/types/network";
 const VERCEL_USER_PAGE = "https://mnist-orchestra-one.vercel.app";
 const NGROK_SERVER = "https://mnist-orchestra.ngrok.io";
 
+// ASCII glitch characters
+const GLITCH_CHARS = "!@#$%^&*()_+-=[]{}|;:,.<>?/\\~`01█▓▒░▀▄▌▐";
+const TARGET_TEXT = "MNIST ORCHESTRA";
+
+/**
+ * Glitch text component with ASCII scramble effect
+ */
+function GlitchText({ onComplete }: { onComplete: () => void }) {
+  const [displayText, setDisplayText] = useState(
+    Array(TARGET_TEXT.length).fill("*").join("")
+  );
+  const [glitchOpacity, setGlitchOpacity] = useState(1);
+
+  useEffect(() => {
+    const revealedChars = new Array(TARGET_TEXT.length).fill(false);
+    let revealed = 0;
+
+    // Phase 1: Glitch scramble
+    const glitchInterval = setInterval(() => {
+      setDisplayText(
+        TARGET_TEXT.split("")
+          .map((char, i) => {
+            if (revealedChars[i]) return char;
+            if (char === " ") return " ";
+            return GLITCH_CHARS[
+              Math.floor(Math.random() * GLITCH_CHARS.length)
+            ];
+          })
+          .join("")
+      );
+    }, 40);
+
+    // Phase 2: Reveal characters one by one (faster)
+    const revealInterval = setInterval(() => {
+      if (revealed >= TARGET_TEXT.length) {
+        clearInterval(revealInterval);
+        return;
+      }
+
+      // Pick a random unrevealed character
+      const unrevealed = revealedChars
+        .map((r, i) => (!r && TARGET_TEXT[i] !== " " ? i : -1))
+        .filter((i) => i !== -1);
+
+      if (unrevealed.length > 0) {
+        const idx = unrevealed[Math.floor(Math.random() * unrevealed.length)];
+        revealedChars[idx] = true;
+        revealed++;
+      }
+    }, 70);
+
+    // Phase 3: All revealed, stop glitching (1.5s)
+    const stopGlitch = setTimeout(() => {
+      clearInterval(glitchInterval);
+      setDisplayText(TARGET_TEXT);
+    }, 1500);
+
+    // Phase 4: Fade out (2s)
+    const fadeOut = setTimeout(() => {
+      setGlitchOpacity(0);
+    }, 2000);
+
+    // Phase 5: Complete (3s)
+    const complete = setTimeout(() => {
+      onComplete();
+    }, 3000);
+
+    return () => {
+      clearInterval(glitchInterval);
+      clearInterval(revealInterval);
+      clearTimeout(stopGlitch);
+      clearTimeout(fadeOut);
+      clearTimeout(complete);
+    };
+  }, [onComplete]);
+
+  return (
+    <h1
+      className="text-5xl font-bold uppercase tracking-[0.25em] text-white md:text-7xl lg:text-8xl font-mono transition-opacity duration-700"
+      style={{ opacity: glitchOpacity }}
+    >
+      {displayText}
+    </h1>
+  );
+}
+
 export default function ConductorPage() {
   const [snapshot, setSnapshot] = useState<CrowdSnapshot | null>(null);
   const [showQR, setShowQR] = useState(false);
-  const [showTitle, setShowTitle] = useState(true);
+  const [introPhase, setIntroPhase] = useState<"title" | "fading" | "done">(
+    "title"
+  );
   const [triggeredIds, setTriggeredIds] = useState<Set<string>>(new Set());
   const [serverUrl, setServerUrl] = useState(NGROK_SERVER);
   const [audioBloom, setAudioBloom] = useState(0);
@@ -121,32 +209,42 @@ export default function ConductorPage() {
     };
   }, [socket, handleChordPlayed]);
 
-  // Fade out title after 5 seconds
-  useEffect(() => {
-    const timer = setTimeout(() => setShowTitle(false), 5000);
-    return () => clearTimeout(timer);
+  // Handle intro completion
+  const handleIntroComplete = useCallback(() => {
+    setIntroPhase("fading");
+    // After fade transition completes, mark as done
+    setTimeout(() => setIntroPhase("done"), 1000);
   }, []);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-black">
       {/* Audio-reactive blob with connected canvases and labels */}
-      <ConductorBlob
-        participants={blobParticipants}
-        triggeredIds={triggeredIds}
-        audioBloom={audioBloom}
-      />
+      <div
+        className="transition-opacity duration-700"
+        style={{ opacity: introPhase === "title" ? 0 : 1 }}
+      >
+        <ConductorBlob
+          participants={blobParticipants}
+          triggeredIds={triggeredIds}
+          audioBloom={audioBloom}
+        />
+      </div>
 
-      {/* Fading title overlay */}
-      {showTitle && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center animate-fade-out">
-          <h1 className="text-6xl font-bold uppercase tracking-[0.3em] text-white md:text-8xl drop-shadow-[0_0_30px_rgba(255,255,255,0.5)]">
-            MNIST ORCHESTRA
-          </h1>
+      {/* Intro overlay with glitch title */}
+      {introPhase !== "done" && (
+        <div
+          className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black transition-opacity duration-700"
+          style={{ opacity: introPhase === "fading" ? 0 : 1 }}
+        >
+          <GlitchText onComplete={handleIntroComplete} />
         </div>
       )}
 
       {/* Top controls */}
-      <div className="absolute left-4 top-4 z-30 flex gap-4">
+      <div
+        className="absolute left-4 top-4 z-30 flex gap-4 transition-opacity duration-700"
+        style={{ opacity: introPhase === "title" ? 0 : 1 }}
+      >
         <Link
           href="/solo"
           className="border border-white/30 bg-black/50 px-4 py-2 text-xs uppercase tracking-widest backdrop-blur transition-colors hover:border-white"
@@ -156,9 +254,7 @@ export default function ConductorPage() {
         <button
           onClick={handleAudioToggle}
           className={`flex items-center gap-2 border border-white/20 bg-black/60 px-4 py-2 text-xs uppercase tracking-widest backdrop-blur-md transition-colors ${
-            audioEnabled
-              ? "text-cyan-400"
-              : "text-gray-500 hover:text-white"
+            audioEnabled ? "text-cyan-400" : "text-gray-500 hover:text-white"
           }`}
         >
           <span
@@ -181,17 +277,21 @@ export default function ConductorPage() {
       </div>
 
       {/* Participant count with limit */}
-      <div className="absolute bottom-4 left-4 z-30">
+      <div
+        className="absolute bottom-4 left-4 z-30 transition-opacity duration-700"
+        style={{ opacity: introPhase === "title" ? 0 : 1 }}
+      >
         <p className="text-xs uppercase tracking-widest text-white/50">
-          {snapshot?.participantCount ?? 0} / {snapshot?.maxParticipants ?? 25} participants
+          {snapshot?.participantCount ?? 0} / {snapshot?.maxParticipants ?? 25}{" "}
+          participants
         </p>
       </div>
 
       {/* QR Code overlay */}
       {showQR && (
         <div className="absolute right-4 top-4 z-30 flex flex-col items-end gap-4 rounded border border-white/20 bg-black/80 p-6 backdrop-blur">
-          <QRCodeSVG value={joinUrl || "https://example.com"} size={180} />
-          <p className="max-w-[180px] break-all text-xs text-gray-400">
+          <QRCodeSVG value={joinUrl || "https://example.com"} size={360} />
+          <p className="max-w-[360px] break-all text-xs text-gray-400">
             {joinUrl}
           </p>
           <input
@@ -205,13 +305,14 @@ export default function ConductorPage() {
       )}
 
       {/* Empty state */}
-      {(!snapshot || snapshot.participants.length === 0) && !showTitle && (
-        <div className="absolute inset-x-0 bottom-[15%] z-10 flex justify-center pointer-events-none">
-          <p className="text-xl uppercase tracking-widest text-gray-600">
-            Waiting for participants...
-          </p>
-        </div>
-      )}
+      {(!snapshot || snapshot.participants.length === 0) &&
+        introPhase === "done" && (
+          <div className="absolute inset-x-0 bottom-[15%] z-10 flex justify-center pointer-events-none">
+            <p className="text-xl uppercase tracking-widest text-gray-600">
+              Waiting for participants...
+            </p>
+          </div>
+        )}
     </main>
   );
 }
