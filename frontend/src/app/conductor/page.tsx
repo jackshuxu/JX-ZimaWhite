@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import Link from "next/link";
 import { getSocket } from "@/lib/socket";
-import type {
-  CrowdSnapshot,
-  ParticipantSnapshot,
-  ChordPlayedEvent,
-} from "@/types/network";
+import {
+  ConductorBlob,
+  type CanvasParticipant,
+} from "@/components/ConductorBlob";
+import type { CrowdSnapshot, ChordPlayedEvent } from "@/types/network";
 
 // Hardcoded URLs for production
 const VERCEL_USER_PAGE = "https://mnist-orchestra-one.vercel.app";
@@ -18,8 +18,9 @@ export default function ConductorPage() {
   const [snapshot, setSnapshot] = useState<CrowdSnapshot | null>(null);
   const [showQR, setShowQR] = useState(false);
   const [showTitle, setShowTitle] = useState(true);
-  const [recentTriggers, setRecentTriggers] = useState<Set<string>>(new Set());
+  const [triggeredIds, setTriggeredIds] = useState<Set<string>>(new Set());
   const [serverUrl, setServerUrl] = useState(NGROK_SERVER);
+  const [audioBloom, setAudioBloom] = useState(0);
 
   const socket = useMemo(() => getSocket(), []);
 
@@ -27,6 +28,48 @@ export default function ConductorPage() {
   const joinUrl = useMemo(() => {
     return `${VERCEL_USER_PAGE}/user?server=${encodeURIComponent(serverUrl)}`;
   }, [serverUrl]);
+
+  // Convert snapshot participants to blob format
+  const blobParticipants: CanvasParticipant[] = useMemo(() => {
+    if (!snapshot) return [];
+    return snapshot.participants.map((p) => ({
+      id: p.socketId,
+      username: p.username || "anon",
+      instrument: p.instrument,
+      imageUrl: p.canvas,
+    }));
+  }, [snapshot]);
+
+  // Handle chord trigger with audio bloom effect
+  const handleChordPlayed = useCallback((data: ChordPlayedEvent) => {
+    // Add to triggered set for visual feedback
+    setTriggeredIds((prev) => new Set(prev).add(data.socketId));
+
+    // Trigger audio bloom
+    setAudioBloom(1);
+
+    // Fade out audio bloom
+    const fadeBloom = () => {
+      setAudioBloom((prev) => {
+        const next = prev * 0.92;
+        if (next > 0.01) {
+          requestAnimationFrame(fadeBloom);
+          return next;
+        }
+        return 0;
+      });
+    };
+    requestAnimationFrame(fadeBloom);
+
+    // Remove from triggered set after animation
+    setTimeout(() => {
+      setTriggeredIds((prev) => {
+        const next = new Set(prev);
+        next.delete(data.socketId);
+        return next;
+      });
+    }, 500);
+  }, []);
 
   // Join as conductor
   useEffect(() => {
@@ -40,18 +83,7 @@ export default function ConductorPage() {
       setSnapshot(data);
     });
 
-    socket.on("chord:played", (data: ChordPlayedEvent) => {
-      // Add to recent triggers for visual feedback
-      setRecentTriggers((prev) => new Set(prev).add(data.socketId));
-      // Remove after animation
-      setTimeout(() => {
-        setRecentTriggers((prev) => {
-          const next = new Set(prev);
-          next.delete(data.socketId);
-          return next;
-        });
-      }, 400);
-    });
+    socket.on("chord:played", handleChordPlayed);
 
     socket.on("connect", () => {
       socket.emit("crowd:join", { role: "conductor" });
@@ -63,7 +95,7 @@ export default function ConductorPage() {
       socket.off("chord:played");
       socket.off("connect");
     };
-  }, [socket]);
+  }, [socket, handleChordPlayed]);
 
   // Fade out title after 5 seconds
   useEffect(() => {
@@ -71,33 +103,26 @@ export default function ConductorPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Generate stable positions for each participant based on socket ID
-  const positions = useMemo(() => {
-    const map: Record<string, { x: number; y: number; delay: number }> = {};
-    snapshot?.participants.forEach((p, idx) => {
-      const hash = hashString(p.socketId);
-      map[p.socketId] = {
-        x: 5 + (hash % 75), // 5-80% horizontal
-        y: 5 + (Math.floor(hash / 7) % 75), // 5-80% vertical
-        delay: idx % 4, // Animation delay variety
-      };
-    });
-    return map;
-  }, [snapshot]);
-
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-black">
+      {/* Audio-reactive blob with connected canvases and labels */}
+      <ConductorBlob
+        participants={blobParticipants}
+        triggeredIds={triggeredIds}
+        audioBloom={audioBloom}
+      />
+
       {/* Fading title overlay */}
       {showTitle && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center animate-fade-out">
-          <h1 className="text-6xl font-bold uppercase tracking-[0.3em] text-white md:text-8xl">
+          <h1 className="text-6xl font-bold uppercase tracking-[0.3em] text-white md:text-8xl drop-shadow-[0_0_30px_rgba(255,255,255,0.5)]">
             MNIST ORCHESTRA
           </h1>
         </div>
       )}
 
       {/* Top controls */}
-      <div className="absolute left-4 top-4 z-10 flex gap-4">
+      <div className="absolute left-4 top-4 z-30 flex gap-4">
         <Link
           href="/solo"
           className="border border-white/30 bg-black/50 px-4 py-2 text-xs uppercase tracking-widest backdrop-blur transition-colors hover:border-white"
@@ -116,9 +141,16 @@ export default function ConductorPage() {
         </button>
       </div>
 
+      {/* Participant count with limit */}
+      <div className="absolute bottom-4 left-4 z-30">
+        <p className="text-xs uppercase tracking-widest text-white/50">
+          {snapshot?.participantCount ?? 0} / {snapshot?.maxParticipants ?? 25} participants
+        </p>
+      </div>
+
       {/* QR Code overlay */}
       {showQR && (
-        <div className="absolute right-4 top-4 z-10 flex flex-col items-end gap-4 rounded border border-white/20 bg-black/80 p-6 backdrop-blur">
+        <div className="absolute right-4 top-4 z-30 flex flex-col items-end gap-4 rounded border border-white/20 bg-black/80 p-6 backdrop-blur">
           <QRCodeSVG value={joinUrl || "https://example.com"} size={180} />
           <p className="max-w-[180px] break-all text-xs text-gray-400">
             {joinUrl}
@@ -133,21 +165,9 @@ export default function ConductorPage() {
         </div>
       )}
 
-      {/* Floating canvases */}
-      <div className="absolute inset-0">
-        {snapshot?.participants.map((participant) => (
-          <FloatingCanvas
-            key={participant.socketId}
-            participant={participant}
-            position={positions[participant.socketId]}
-            isTriggered={recentTriggers.has(participant.socketId)}
-          />
-        ))}
-      </div>
-
       {/* Empty state */}
       {(!snapshot || snapshot.participants.length === 0) && !showTitle && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-x-0 bottom-[15%] z-10 flex justify-center pointer-events-none">
           <p className="text-xl uppercase tracking-widest text-gray-600">
             Waiting for participants...
           </p>
@@ -155,73 +175,4 @@ export default function ConductorPage() {
       )}
     </main>
   );
-}
-
-function FloatingCanvas({
-  participant,
-  position,
-  isTriggered,
-}: {
-  participant: ParticipantSnapshot;
-  position?: { x: number; y: number; delay: number };
-  isTriggered: boolean;
-}) {
-  if (!position) return null;
-
-  const delayClass = [
-    "",
-    "animate-float-delay-1",
-    "animate-float-delay-2",
-    "animate-float-delay-3",
-  ][position.delay];
-
-  return (
-    <div
-      className={`absolute flex flex-col items-center gap-2 transition-all duration-300 animate-float ${delayClass} ${
-        isTriggered ? "animate-glow scale-110" : ""
-      }`}
-      style={{
-        left: `${position.x}%`,
-        top: `${position.y}%`,
-        transform: "translate(-50%, -50%)",
-      }}
-    >
-      {/* Canvas image */}
-      <div
-        className={`border-2 transition-colors ${
-          isTriggered ? "border-white" : "border-white/30"
-        }`}
-      >
-        {participant.canvas ? (
-          <img
-            src={participant.canvas}
-            alt={participant.username}
-            className="h-24 w-24 object-cover"
-          />
-        ) : (
-          <div className="flex h-24 w-24 items-center justify-center border border-dashed border-white/20 text-xs text-gray-600">
-            ...
-          </div>
-        )}
-      </div>
-
-      {/* Label */}
-      <div className="text-center">
-        <p className="text-xs uppercase tracking-widest text-white">
-          {participant.username || "anon"}
-        </p>
-        <p className="text-[10px] uppercase tracking-widest text-gray-500">
-          {participant.instrument}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 31 + str.charCodeAt(i)) % 997;
-  }
-  return hash;
 }

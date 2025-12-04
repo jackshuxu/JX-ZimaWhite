@@ -113,6 +113,10 @@ class SessionManager:
     def get_participant(self, socket_id: str) -> Optional[ParticipantState]:
         return self.state.participants.get(socket_id)
 
+    def participant_count(self) -> int:
+        """Returns current number of participants."""
+        return len(self.state.participants)
+
     # ---------------------------------------------------------------- conductor
     def join_conductor(self, socket_id: str) -> bool:
         """Returns True if conductor slot granted, False if already taken."""

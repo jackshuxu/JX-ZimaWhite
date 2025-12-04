@@ -218,6 +218,7 @@ export function DrawingCanvas({
       )}
       <canvas
         ref={canvasRef}
+        id="drawing-canvas"
         className="border border-white/20 bg-black shadow-[0_0_60px_rgba(255,255,255,0.05)]"
         style={{ width, height, touchAction: "none" }}
         onPointerDown={pointerDown}

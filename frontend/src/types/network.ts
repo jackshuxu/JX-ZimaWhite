@@ -26,8 +26,18 @@ export type ParticipantSnapshot = {
 export type CrowdSnapshot = {
   participants: ParticipantSnapshot[];
   participantCount: number;
+  maxParticipants: number;
   hasConductor: boolean;
   instrumentMix: Record<string, number>;
+};
+
+/**
+ * Error event from backend.
+ */
+export type CrowdError = {
+  code?: string;
+  message: string;
+  maxParticipants?: number;
 };
 
 /**

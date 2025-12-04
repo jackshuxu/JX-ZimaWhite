@@ -20,6 +20,9 @@ RATE_LIMIT_SEC = RATE_LIMIT_MS / 1000
 INACTIVITY_TIMEOUT_SEC = 120
 CLEANUP_INTERVAL_SEC = 10
 
+# Maximum participants in orchestra
+MAX_PARTICIPANTS = 25
+
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins="*",
@@ -30,6 +33,13 @@ sio = socketio.AsyncServer(
 
 manager = SessionManager()
 osc = OscSender()
+
+
+def _snapshot_with_limit() -> dict:
+    """Get snapshot with maxParticipants included."""
+    snapshot = manager.snapshot()
+    snapshot["maxParticipants"] = MAX_PARTICIPANTS
+    return snapshot
 
 # Per-socket timestamps for rate limiting
 _last_canvas: dict[str, float] = {}
@@ -52,7 +62,7 @@ async def _cleanup_inactive():
         removed = manager.remove_inactive(INACTIVITY_TIMEOUT_SEC)
         if removed:
             logger.info("Removed %d inactive participant(s)", removed)
-            await sio.emit("crowd:snapshot", manager.snapshot(), room="crowd")
+            await sio.emit("crowd:snapshot", _snapshot_with_limit(), room="crowd")
 
 
 _cleanup_task: asyncio.Task | None = None
@@ -121,6 +131,20 @@ async def handle_crowd_join(sid, data):
             )
             return
     else:
+        # Check if orchestra is full
+        current_count = manager.participant_count()
+        if current_count >= MAX_PARTICIPANTS:
+            await sio.emit(
+                "crowd:error",
+                {
+                    "code": "ORCHESTRA_FULL",
+                    "message": f"Orchestra is full ({MAX_PARTICIPANTS}/{MAX_PARTICIPANTS} participants)",
+                    "maxParticipants": MAX_PARTICIPANTS,
+                },
+                to=sid,
+            )
+            return
+        
         manager.join_participant(
             socket_id=sid,
             instrument=instrument,
@@ -129,10 +153,10 @@ async def handle_crowd_join(sid, data):
 
     await sio.emit(
         "crowd:joined",
-        {"role": role},
+        {"role": role, "maxParticipants": MAX_PARTICIPANTS},
         to=sid,
     )
-    await sio.emit("crowd:snapshot", manager.snapshot(), room="crowd")
+    await sio.emit("crowd:snapshot", _snapshot_with_limit(), room="crowd")
 
 
 @sio.on("canvas:update")

@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DrawingCanvas } from "@/components/DrawingCanvas";
+import { OutputVisualization } from "@/components/OutputVisualization";
 import { useNetwork } from "@/hooks/useNetwork";
 import { getSocket } from "@/lib/socket";
-import { INSTRUMENTS, type Instrument } from "@/types/network";
+import { INSTRUMENTS, type Instrument, type CrowdError } from "@/types/network";
 
 export default function UserPage() {
   const router = useRouter();
@@ -20,7 +21,11 @@ export default function UserPage() {
   const [isReady, setIsReady] = useState(false);
   const [drawMode, setDrawMode] = useState<"pen" | "erase">("pen");
   const [triggerFlash, setTriggerFlash] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement & { clearCanvas?: () => void }>(null);
+  const [orchestraFull, setOrchestraFull] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement & { clearCanvas?: () => void }>(
+    null
+  );
 
   // Check for nickname from auth page on mount
   useEffect(() => {
@@ -47,6 +52,18 @@ export default function UserPage() {
 
     socket.on("crowd:joined", () => {
       setConnected(true);
+      setOrchestraFull(false);
+      setErrorMessage(null);
+    });
+
+    socket.on("crowd:error", (data: CrowdError) => {
+      if (data.code === "ORCHESTRA_FULL") {
+        setOrchestraFull(true);
+        setErrorMessage(data.message);
+        setConnected(false);
+      } else {
+        setErrorMessage(data.message);
+      }
     });
 
     socket.on("connect", () => {
@@ -65,6 +82,7 @@ export default function UserPage() {
 
     return () => {
       socket.off("crowd:joined");
+      socket.off("crowd:error");
       socket.off("connect");
       socket.off("chord:played");
     };
@@ -111,6 +129,37 @@ export default function UserPage() {
         <div className="text-xs uppercase tracking-[0.5em] text-gray-500 animate-pulse">
           Loading...
         </div>
+      </main>
+    );
+  }
+
+  // Show orchestra full state
+  if (orchestraFull) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-black text-white gap-6">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold uppercase tracking-widest text-red-400 mb-2">
+            Orchestra Full
+          </h1>
+          <p className="text-sm uppercase tracking-widest text-gray-500 max-w-xs">
+            {errorMessage ||
+              "The orchestra has reached its maximum capacity. Please try again later."}
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setOrchestraFull(false);
+            setErrorMessage(null);
+            socket.emit("crowd:join", {
+              role: "participant",
+              username: username || "anonymous",
+              instrument,
+            });
+          }}
+          className="border border-white/30 px-6 py-3 text-xs uppercase tracking-widest text-white transition-colors hover:border-white hover:bg-white/10"
+        >
+          Try Again
+        </button>
       </main>
     );
   }
@@ -176,7 +225,9 @@ export default function UserPage() {
             ))}
             <button
               onClick={() => {
-                const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+                const canvas = document.getElementById(
+                  "drawing-canvas"
+                ) as HTMLCanvasElement;
                 if (canvas) {
                   const ctx = canvas.getContext("2d");
                   if (ctx) {
@@ -205,8 +256,13 @@ export default function UserPage() {
               onClear={handleClear}
             />
 
+            {/* Output visualization - 10 octahedrons for digits 0-9 */}
+            <div className="my-2">
+              <OutputVisualization activations={activations?.output} />
+            </div>
+
             {/* Bottom row: Status + Play */}
-            <div className="mt-2 flex items-center justify-between">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 <span
                   className={`h-2 w-2 rounded-full ${
