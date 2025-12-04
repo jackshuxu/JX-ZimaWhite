@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import Link from "next/link";
 import { getSocket } from "@/lib/socket";
@@ -8,6 +8,7 @@ import {
   ConductorBlob,
   type CanvasParticipant,
 } from "@/components/ConductorBlob";
+import { useConductorSonification } from "@/hooks/useConductorSonification";
 import type { CrowdSnapshot, ChordPlayedEvent } from "@/types/network";
 
 // Hardcoded URLs for production
@@ -21,8 +22,28 @@ export default function ConductorPage() {
   const [triggeredIds, setTriggeredIds] = useState<Set<string>>(new Set());
   const [serverUrl, setServerUrl] = useState(NGROK_SERVER);
   const [audioBloom, setAudioBloom] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(false);
 
   const socket = useMemo(() => getSocket(), []);
+
+  // Sonification hook
+  const { playChord, initAudio } = useConductorSonification({
+    enabled: audioEnabled,
+    masterVolume: 0.6,
+  });
+
+  // Handle audio toggle (must init on user click for Web Audio)
+  const handleAudioToggle = useCallback(() => {
+    const newEnabled = !audioEnabled;
+    setAudioEnabled(newEnabled);
+    if (newEnabled) {
+      initAudio();
+    }
+  }, [audioEnabled, initAudio]);
+
+  // Ref to access playChord in callbacks without causing re-renders
+  const playChordRef = useRef(playChord);
+  playChordRef.current = playChord;
 
   // The QR code always points to Vercel user page with ngrok server
   const joinUrl = useMemo(() => {
@@ -40,13 +61,16 @@ export default function ConductorPage() {
     }));
   }, [snapshot]);
 
-  // Handle chord trigger with audio bloom effect
+  // Handle chord trigger with audio bloom effect and sonification
   const handleChordPlayed = useCallback((data: ChordPlayedEvent) => {
     // Add to triggered set for visual feedback
     setTriggeredIds((prev) => new Set(prev).add(data.socketId));
 
     // Trigger audio bloom
     setAudioBloom(1);
+
+    // Play the chord sound
+    playChordRef.current(data);
 
     // Fade out audio bloom
     const fadeBloom = () => {
@@ -129,6 +153,21 @@ export default function ConductorPage() {
         >
           ← SOLO
         </Link>
+        <button
+          onClick={handleAudioToggle}
+          className={`flex items-center gap-2 border border-white/20 bg-black/60 px-4 py-2 text-xs uppercase tracking-widest backdrop-blur-md transition-colors ${
+            audioEnabled
+              ? "text-cyan-400"
+              : "text-gray-500 hover:text-white"
+          }`}
+        >
+          <span
+            className={`h-2 w-2 rounded-full transition-colors ${
+              audioEnabled ? "bg-cyan-400 animate-pulse" : "bg-gray-600"
+            }`}
+          />
+          {audioEnabled ? "Audio On" : "Audio Off"}
+        </button>
         <button
           onClick={() => setShowQR(!showQR)}
           className={`border px-4 py-2 text-xs uppercase tracking-widest backdrop-blur transition-colors ${

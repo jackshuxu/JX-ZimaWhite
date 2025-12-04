@@ -1,0 +1,386 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ChordPlayedEvent } from "@/types/network";
+
+/**
+ * Conductor sonification hook for incoming chord events.
+ *
+ * Synth voices:
+ * - Pad: sine + LPF, slow linen envelope (for pad/drone instruments)
+ * - Soft bell: dual sine + LFO-modulated LPF (for lead/bass instruments)
+ */
+
+// Natural minor scale degrees (semitones from root)
+const SCALE = [0, 2, 3, 5, 7, 8, 10];
+
+/**
+ * Quantize a MIDI note to the nearest scale degree
+ */
+function quantize(midiNote: number): number {
+  const octave = Math.floor(midiNote / 12);
+  const degree = midiNote % 12;
+
+  let nearestDeg = SCALE[0];
+  let minDist = Math.abs(SCALE[0] - degree);
+
+  for (const d of SCALE) {
+    const dist = Math.abs(d - degree);
+    if (dist < minDist) {
+      minDist = dist;
+      nearestDeg = d;
+    }
+  }
+
+  return octave * 12 + nearestDeg;
+}
+
+/**
+ * Convert MIDI note to frequency, clamped to audible range
+ */
+function midiToFreq(midi: number): number {
+  const clampedMidi = Math.max(24, Math.min(96, midi));
+  return 440 * Math.pow(2, (clampedMidi - 69) / 12);
+}
+
+/**
+ * Random number in range [min, max]
+ */
+function rrand(min: number, max: number): number {
+  return min + Math.random() * (max - min);
+}
+
+/**
+ * Fisher-Yates shuffle
+ */
+function shuffleArray<T>(arr: T[]): T[] {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+type ConductorSonificationOptions = {
+  enabled: boolean;
+  masterVolume?: number;
+};
+
+type ConductorSonificationState = {
+  isReady: boolean;
+  audioContextState: AudioContextState | null;
+};
+
+export function useConductorSonification(
+  options: ConductorSonificationOptions
+): {
+  state: ConductorSonificationState;
+  playChord: (event: ChordPlayedEvent) => void;
+  initAudio: () => Promise<AudioContext | null>;
+} {
+  const { enabled, masterVolume = 0.6 } = options;
+
+  // Audio refs
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const scheduledNotesRef = useRef<Set<ReturnType<typeof setTimeout>>>(
+    new Set()
+  );
+
+  const [state, setState] = useState<ConductorSonificationState>({
+    isReady: false,
+    audioContextState: null,
+  });
+
+  /**
+   * Initialize audio context (must be called from user interaction)
+   */
+  const initAudio = useCallback(async () => {
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioContext();
+        const master = audioCtxRef.current.createGain();
+        master.gain.value = masterVolume;
+        master.connect(audioCtxRef.current.destination);
+        masterGainRef.current = master;
+        console.log("[ConductorAudio] AudioContext created");
+      }
+
+      if (audioCtxRef.current.state === "suspended") {
+        await audioCtxRef.current.resume();
+        console.log("[ConductorAudio] AudioContext resumed");
+      }
+
+      setState({
+        isReady: true,
+        audioContextState: audioCtxRef.current.state,
+      });
+
+      console.log("[ConductorAudio] Ready, state:", audioCtxRef.current.state);
+      return audioCtxRef.current;
+    } catch (err) {
+      console.error("[ConductorAudio] Init failed:", err);
+      return null;
+    }
+  }, [masterVolume]);
+
+  /**
+   * Create a pad synth voice (for pad/drone instruments)
+   */
+  const createPadVoice = useCallback((freq: number, amp: number) => {
+    const ctx = audioCtxRef.current;
+    const master = masterGainRef.current;
+    if (!ctx || !master || amp < 0.001) return;
+
+    const now = ctx.currentTime;
+    const attack = 0.3;
+    const sustain = 1.0;
+    const release = 0.4;
+    const duration = attack + sustain + release;
+
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 1800;
+    filter.Q.value = 0.5;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(amp, now + attack);
+    gain.gain.setValueAtTime(amp, now + attack + sustain);
+    gain.gain.linearRampToValueAtTime(0, now + duration);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+
+    osc.start(now);
+    osc.stop(now + duration + 0.1);
+
+    osc.onended = () => {
+      osc.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
+  }, []);
+
+  /**
+   * Create a soft bell voice (for lead/bass instruments)
+   */
+  const createSoftBellVoice = useCallback((freq: number, amp: number) => {
+    const ctx = audioCtxRef.current;
+    const master = masterGainRef.current;
+    if (!ctx || !master || amp < 0.001) return;
+
+    const now = ctx.currentTime;
+    const lfoRate = 0.2 + Math.random() * 0.4;
+    const filterCenter = 800;
+    const filterDepth = 300;
+    const attack = 0.005 + Math.random() * 0.01;
+    const decay = 1.2;
+    const duration = attack + decay;
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.value = freq;
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.value = freq * 2.01;
+
+    const harmonicGain = ctx.createGain();
+    harmonicGain.gain.value = 0.3;
+
+    const mixer = ctx.createGain();
+    mixer.gain.value = 1;
+
+    const lfo = ctx.createOscillator();
+    lfo.type = "triangle";
+    lfo.frequency.value = lfoRate;
+
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = filterDepth;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = filterCenter;
+    filter.Q.value = 3;
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(amp, now + attack);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    osc1.connect(mixer);
+    osc2.connect(harmonicGain);
+    harmonicGain.connect(mixer);
+    mixer.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+
+    osc1.start(now);
+    osc2.start(now);
+    lfo.start(now);
+
+    osc1.stop(now + duration + 0.1);
+    osc2.stop(now + duration + 0.1);
+    lfo.stop(now + duration + 0.1);
+
+    osc1.onended = () => {
+      osc1.disconnect();
+      osc2.disconnect();
+      lfo.disconnect();
+      lfoGain.disconnect();
+      harmonicGain.disconnect();
+      mixer.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
+  }, []);
+
+  /**
+   * Schedule a soft bell note with cleanup tracking
+   */
+  const scheduleNote = useCallback(
+    (
+      freq: number,
+      amp: number,
+      delayTime: number,
+      voice: "pad" | "bell"
+    ) => {
+      const timeoutId = setTimeout(() => {
+        scheduledNotesRef.current.delete(timeoutId);
+        if (voice === "pad") {
+          createPadVoice(freq, amp);
+        } else {
+          createSoftBellVoice(freq, amp);
+        }
+      }, delayTime * 1000);
+
+      scheduledNotesRef.current.add(timeoutId);
+    },
+    [createPadVoice, createSoftBellVoice]
+  );
+
+  /**
+   * Clear all scheduled notes
+   */
+  const clearScheduledNotes = useCallback(() => {
+    scheduledNotesRef.current.forEach((id) => clearTimeout(id));
+    scheduledNotesRef.current.clear();
+  }, []);
+
+  /**
+   * Play a chord based on incoming event
+   */
+  const playChord = useCallback(
+    (event: ChordPlayedEvent) => {
+      console.log("[ConductorAudio] playChord called:", {
+        enabled,
+        hasContext: !!audioCtxRef.current,
+        contextState: audioCtxRef.current?.state,
+        instrument: event.instrument,
+        outputLength: event.output?.length,
+      });
+
+      if (!enabled) {
+        console.log("[ConductorAudio] Skipped: not enabled");
+        return;
+      }
+      
+      if (!audioCtxRef.current) {
+        console.log("[ConductorAudio] Skipped: no audio context");
+        return;
+      }
+
+      // Resume context if suspended (can happen after tab switches)
+      if (audioCtxRef.current.state === "suspended") {
+        audioCtxRef.current.resume();
+      }
+
+      const { instrument, output } = event;
+      if (!output || output.length === 0) {
+        console.log("[ConductorAudio] Skipped: no output data");
+        return;
+      }
+
+      // Determine voice type based on instrument
+      const voiceType: "pad" | "bell" =
+        instrument === "pad" || instrument === "drone" ? "pad" : "bell";
+      
+      console.log("[ConductorAudio] Playing:", voiceType, "for", instrument);
+
+      // Get active notes (activation > 0.2)
+      const activeNotes: { index: number; amp: number }[] = [];
+      output.forEach((v, i) => {
+        if (v > 0.2) {
+          activeNotes.push({ index: i, amp: v });
+        }
+      });
+
+      if (activeNotes.length === 0) return;
+
+      if (voiceType === "pad") {
+        // Play all pad notes together (chord)
+        activeNotes.forEach((note) => {
+          const freq = midiToFreq(quantize(note.index + 48)); // C3 base
+          const amp = note.amp * 0.15 * masterVolume;
+          createPadVoice(freq, amp);
+        });
+      } else {
+        // Play as arpeggiated bell sequence
+        const repetitions = Math.floor(rrand(2, 4));
+        const arpPattern: typeof activeNotes = [];
+        for (let r = 0; r < repetitions; r++) {
+          arpPattern.push(...shuffleArray(activeNotes));
+        }
+
+        const baseInterval = 0.1;
+        let accumulatedTime = 0;
+        arpPattern.forEach((note) => {
+          const freq = midiToFreq(quantize(note.index + 60)); // C4 base
+          const amp = note.amp * 0.1 * masterVolume;
+          scheduleNote(freq, amp, accumulatedTime, "bell");
+          accumulatedTime += baseInterval * rrand(0.7, 1.4);
+        });
+      }
+    },
+    [enabled, masterVolume, createPadVoice, scheduleNote]
+  );
+
+  /**
+   * Initialize on mount if enabled
+   */
+  useEffect(() => {
+    if (enabled) {
+      initAudio();
+    }
+
+    return () => {
+      clearScheduledNotes();
+    };
+  }, [enabled, initAudio, clearScheduledNotes]);
+
+  /**
+   * Cleanup on unmount
+   */
+  useEffect(() => {
+    return () => {
+      clearScheduledNotes();
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close();
+        audioCtxRef.current = null;
+      }
+    };
+  }, [clearScheduledNotes]);
+
+  return { state, playChord, initAudio };
+}
+

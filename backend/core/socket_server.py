@@ -209,6 +209,8 @@ async def handle_chord_trigger(sid, data):
         {
             "socketId": sid,
             "instrument": chord.instrument,
+            "output": chord.output,
+            "username": participant.username,
         },
         room="crowd",
     )

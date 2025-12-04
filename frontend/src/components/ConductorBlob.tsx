@@ -343,7 +343,7 @@ export function ConductorBlob({
       const canvasSize = 0.65;
       const canvasGeometry = new THREE.PlaneGeometry(canvasSize, canvasSize);
       const canvasMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+        color: 0x000000,
         side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.9,
@@ -354,11 +354,13 @@ export function ConductorBlob({
         const cachedTexture = textureCache.current.get(participant.imageUrl);
         if (cachedTexture) {
           canvasMaterial.map = cachedTexture;
+          canvasMaterial.color.setHex(0xffffff); // White to show texture properly
         } else {
           textureLoaderRef.current.load(participant.imageUrl, (texture) => {
             texture.minFilter = THREE.LinearFilter;
             texture.magFilter = THREE.LinearFilter;
             canvasMaterial.map = texture;
+            canvasMaterial.color.setHex(0xffffff); // White to show texture properly
             canvasMaterial.needsUpdate = true;
             textureCache.current.set(participant.imageUrl!, texture);
           });
@@ -465,6 +467,7 @@ export function ConductorBlob({
             canvasMat.map.dispose();
           }
           canvasMat.map = cachedTexture;
+          canvasMat.color.setHex(0xffffff); // White to show texture properly
           canvasMat.needsUpdate = true;
         } else {
           textureLoaderRef.current.load(participant.imageUrl, (texture) => {
@@ -473,6 +476,7 @@ export function ConductorBlob({
             // Dispose old texture
             if (canvasMat.map) canvasMat.map.dispose();
             canvasMat.map = texture;
+            canvasMat.color.setHex(0xffffff); // White to show texture properly
             canvasMat.needsUpdate = true;
             textureCache.current.set(participant.imageUrl!, texture);
           });
@@ -481,6 +485,7 @@ export function ConductorBlob({
         // No image anymore, remove texture
         canvasMat.map.dispose();
         canvasMat.map = null;
+        canvasMat.color.setHex(0x000000); // Black when no texture
         canvasMat.needsUpdate = true;
       }
 

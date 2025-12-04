@@ -72,6 +72,8 @@ export type ChordTriggerPayload = {
 export type ChordPlayedEvent = {
   socketId: string;
   instrument: string;
+  output: number[];
+  username: string;
 };
 
 /**
