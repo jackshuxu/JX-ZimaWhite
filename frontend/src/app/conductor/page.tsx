@@ -10,32 +10,22 @@ import type {
   ChordPlayedEvent,
 } from "@/types/network";
 
+// Hardcoded URLs for production
+const VERCEL_USER_PAGE = "https://mnist-orchestra-one.vercel.app";
+const NGROK_SERVER = "https://mnist-orchestra.ngrok.io";
+
 export default function ConductorPage() {
   const [snapshot, setSnapshot] = useState<CrowdSnapshot | null>(null);
   const [showQR, setShowQR] = useState(false);
   const [showTitle, setShowTitle] = useState(true);
   const [recentTriggers, setRecentTriggers] = useState<Set<string>>(new Set());
-  const [serverUrl, setServerUrl] = useState("");
+  const [serverUrl, setServerUrl] = useState(NGROK_SERVER);
 
   const socket = useMemo(() => getSocket(), []);
 
-  // Build QR URL
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      // Get the ngrok URL from query param or use current origin
-      const params = new URLSearchParams(window.location.search);
-      const server =
-        params.get("server") ||
-        window.location.origin.replace(":3000", ":8000");
-      setServerUrl(server);
-    }
-  }, []);
-
+  // The QR code always points to Vercel user page with ngrok server
   const joinUrl = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    // For Vercel deployment, point to the deployed user page with server param
-    const origin = window.location.origin;
-    return `${origin}/user?server=${encodeURIComponent(serverUrl)}`;
+    return `${VERCEL_USER_PAGE}/user?server=${encodeURIComponent(serverUrl)}`;
   }, [serverUrl]);
 
   // Join as conductor
