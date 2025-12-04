@@ -24,7 +24,6 @@ export default function SoloPage() {
   const lastEmitRef = useRef(0);
   const [connected, setConnected] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
-  const [volume, setVolume] = useState(0.5);
 
   // Detect if canvas is empty
   const canvasEmpty = useMemo(() => isCanvasEmpty(inputArr), [inputArr]);
@@ -95,10 +94,11 @@ export default function SoloPage() {
   }, [activations, canvasEmpty]);
 
   // Web Audio sonification
-  const { isPlaying } = useSonification(
+  const { isPlaying, bloomEnvelope, bloomLfo } = useSonification(
     displayActivations?.hidden1 ?? null,
     displayActivations?.hidden2 ?? null,
-    { enabled: audioEnabled, masterVolume: volume }
+    displayActivations?.output ?? null,
+    { enabled: audioEnabled }
   );
 
   return (
@@ -112,6 +112,8 @@ export default function SoloPage() {
             hidden2: displayActivations?.hidden2,
             output: displayActivations?.output,
           }}
+          bloomEnvelope={bloomEnvelope}
+          bloomLfo={bloomLfo}
         />
       </div>
 
@@ -132,39 +134,22 @@ export default function SoloPage() {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Audio Controls */}
-            <div className="flex items-center gap-3 border border-white/20 bg-black/60 px-4 py-2 backdrop-blur-md">
-              <button
-                onClick={() => setAudioEnabled(!audioEnabled)}
-                className={`flex items-center gap-2 text-xs uppercase tracking-widest transition-colors ${
-                  audioEnabled
-                    ? "text-cyan-400"
-                    : "text-gray-500 hover:text-white"
+            {/* Audio Toggle */}
+            <button
+              onClick={() => setAudioEnabled(!audioEnabled)}
+              className={`flex items-center gap-2 border border-white/20 bg-black/60 px-4 py-2 text-xs uppercase tracking-widest backdrop-blur-md transition-colors ${
+                audioEnabled
+                  ? "text-cyan-400"
+                  : "text-gray-500 hover:text-white"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full transition-colors ${
+                  isPlaying ? "bg-cyan-400 animate-pulse" : "bg-gray-600"
                 }`}
-              >
-                <span
-                  className={`h-2 w-2 rounded-full transition-colors ${
-                    isPlaying ? "bg-cyan-400 animate-pulse" : "bg-gray-600"
-                  }`}
-                />
-                {audioEnabled ? "Audio On" : "Audio Off"}
-              </button>
-
-              {audioEnabled && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-gray-500">VOL</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={volume}
-                    onChange={(e) => setVolume(parseFloat(e.target.value))}
-                    className="h-1 w-16 cursor-pointer appearance-none rounded bg-white/20 accent-cyan-400"
-                  />
-                </div>
-              )}
-            </div>
+              />
+              {audioEnabled ? "Audio On" : "Audio Off"}
+            </button>
 
             <Link
               href="/conductor"

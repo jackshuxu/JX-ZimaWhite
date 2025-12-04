@@ -12,6 +12,8 @@ type Props = {
     hidden2?: LayerActivations;
     output?: LayerActivations;
   };
+  bloomEnvelope?: number; // 0-1, envelope triggered by sounds
+  bloomLfo?: number; // 0-1, LFO modulation within envelope
 };
 
 // Neuron structure: group containing fill mesh, edge wireframe, and optional glow sprite
@@ -65,7 +67,11 @@ function getOutputColor(digitIndex: number): THREE.Color {
  * Layers: 784 (input) → 128 (hidden1) → 64 (hidden2) → 10 (output)
  * Each neuron is a box filled with color based on activation level.
  */
-export function NeuralNetwork3D({ layers }: Props) {
+export function NeuralNetwork3D({
+  layers,
+  bloomEnvelope = 0,
+  bloomLfo = 0,
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -160,7 +166,7 @@ export function NeuralNetwork3D({ layers }: Props) {
     };
   }, []);
 
-  // Update neuron colors/opacity based on activations
+  // Update neuron colors/opacity based on activations and audio envelope
   useEffect(() => {
     if (!layers || !layerRefs.current.length) return;
     const { input = [], hidden1 = [], hidden2 = [], output = [] } = layers;
@@ -171,11 +177,18 @@ export function NeuralNetwork3D({ layers }: Props) {
       normalize(output),
     ];
 
+    // Bloom modulation: envelope gates the bloom, LFO modulates within envelope
+    // When envelope > 0, bloom is active and follows LFO curve
+    // Base bloom = envelope * (0.5 + 0.5 * lfo) for pulsing effect
+    const bloomModulation =
+      bloomEnvelope > 0.01 ? bloomEnvelope * (0.5 + bloomLfo * 0.5) : 0;
+
     // Update neurons
     layerActivations.forEach((activation, layerIndex) => {
       const neurons = layerRefs.current[layerIndex];
       if (!neurons) return;
       const isOutputLayer = layerIndex === 3;
+      const isInputLayer = layerIndex === 0;
 
       activation.forEach((value, idx) => {
         const neuron = neurons[idx];
@@ -204,16 +217,29 @@ export function NeuralNetwork3D({ layers }: Props) {
         edgeMat.opacity = Math.max(0.4, value);
         edgeMat.color.copy(boostedColor);
 
-        // Update glow sprite - bloom effect scaled by activation
+        // Update glow sprite - bloom triggers with sound, follows envelope + LFO
         const glow = neuron.userData.glowSprite;
-        if (glow) {
+        if (glow && !isInputLayer) {
           const baseSize = neuron.userData.baseSize;
-          // Bloom size: grows exponentially with activation (2x to 8x box size)
-          const glowScale = baseSize * (2 + value * value * 6);
-          glow.scale.set(glowScale, glowScale, 1);
-          // Bloom opacity: 0 to 0.7 based on activation (more visible)
-          const glowOpacity = value * value * 0.7; // Quadratic for dramatic effect
-          (glow.material as THREE.SpriteMaterial).opacity = glowOpacity;
+          // Base bloom from activation
+          const activationBloom = value * value;
+
+          if (bloomModulation > 0.01 && activationBloom > 0.01) {
+            // When sound is playing: bloom pulses with envelope + LFO
+            const glowScale =
+              baseSize *
+              (2 + activationBloom * 6 * (0.8 + bloomModulation * 0.4));
+            glow.scale.set(glowScale, glowScale, 1);
+            const glowOpacity =
+              activationBloom * 0.7 * (0.3 + bloomModulation * 0.7);
+            (glow.material as THREE.SpriteMaterial).opacity = glowOpacity;
+          } else {
+            // No sound: minimal static bloom based on activation only
+            const glowScale = baseSize * (2 + activationBloom * 4);
+            glow.scale.set(glowScale, glowScale, 1);
+            const glowOpacity = activationBloom * 0.3; // Dimmer when no sound
+            (glow.material as THREE.SpriteMaterial).opacity = glowOpacity;
+          }
           (glow.material as THREE.SpriteMaterial).color.copy(boostedColor);
         }
       });
@@ -243,7 +269,7 @@ export function NeuralNetwork3D({ layers }: Props) {
       conn.line.material.opacity = Math.max(0.05, avgActivation * 0.7);
       conn.line.material.color.copy(boostedColor);
     });
-  }, [layers]);
+  }, [layers, bloomEnvelope, bloomLfo]);
 
   return (
     <div

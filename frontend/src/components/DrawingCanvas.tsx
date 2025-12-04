@@ -26,6 +26,7 @@ export function DrawingCanvas({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const smallRef = useRef<HTMLCanvasElement | null>(null);
+  const smallCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const [mode, setMode] = useState<"pen" | "erase">("pen");
   const drawing = useRef(false);
   const lastEmitRef = useRef(0);
@@ -64,12 +65,10 @@ export function DrawingCanvas({
   const emitInputImmediate = useCallback(() => {
     const canvas = canvasRef.current;
     const small = smallRef.current;
-    if (!canvas || !small) return;
+    const smallCtx = smallCtxRef.current;
+    if (!canvas || !small || !smallCtx) return;
 
     lastEmitRef.current = Date.now();
-
-    const smallCtx = small.getContext("2d");
-    if (!smallCtx) return;
 
     // Downsample to 28x28
     smallCtx.drawImage(
@@ -110,6 +109,10 @@ export function DrawingCanvas({
     smallCanvas.width = 28;
     smallCanvas.height = 28;
     smallRef.current = smallCanvas;
+    // Use willReadFrequently for better getImageData performance
+    smallCtxRef.current = smallCanvas.getContext("2d", {
+      willReadFrequently: true,
+    });
 
     // Emit initial empty state after a frame
     const rafId = requestAnimationFrame(() => {

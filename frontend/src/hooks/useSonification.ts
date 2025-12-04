@@ -3,18 +3,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * Web Audio sonification hook that recreates the SuperCollider logic.
+ * Web Audio sonification hook for neural network activations.
  *
- * SuperCollider original:
- * - Scale: [0, 2, 3, 5, 7, 8, 10] (natural minor/Aeolian)
- * - Pad synth: sine + LPF at 2000Hz, linen envelope (0.5, 1.2, 0.5)
- * - Lead synth: sine + harmonic, LFO modulated RLPF, perc envelope
- * - Pad routine: every 4-5 sec, plays h1 (MIDI = i) and h2 (MIDI = i + 36)
- * - Lead routine: every 0.1-1.1 sec, plays h1 (MIDI = i + 24)
+ * Synth voices:
+ * - Pad: sine + LPF, slow linen envelope (for h1/h2 hidden layers)
+ * - Lead: dual sine + LFO-modulated LPF, percussive (for h1 bells)
+ * - Soft bell: gentler lead variant (for output arpeggio)
+ *
+ * Routines:
+ * - Pad: every 4-5 sec
+ * - Lead: every 0.1-1.1 sec
+ * - Arp: confidence-scaled interval (1-10 sec)
  */
 
 // Natural minor scale degrees (semitones from root)
 const SCALE = [0, 2, 3, 5, 7, 8, 10];
+
+// Envelope durations (seconds)
+const LEAD_DURATION = 1.8;
+const PAD_DURATION = 2.2;
+const LFO_RATE = 0.5; // Hz
 
 /**
  * Quantize a MIDI note to the nearest scale degree
@@ -23,7 +31,6 @@ function quantize(midiNote: number): number {
   const octave = Math.floor(midiNote / 12);
   const degree = midiNote % 12;
 
-  // Find nearest scale degree
   let nearestDeg = SCALE[0];
   let minDist = Math.abs(SCALE[0] - degree);
 
@@ -42,7 +49,6 @@ function quantize(midiNote: number): number {
  * Convert MIDI note to frequency, clamped to audible range
  */
 function midiToFreq(midi: number): number {
-  // Clamp MIDI note to reasonable range (C1 = 24 to C7 = 96)
   const clampedMidi = Math.max(24, Math.min(96, midi));
   return 440 * Math.pow(2, (clampedMidi - 69) / 12);
 }
@@ -54,36 +60,86 @@ function rrand(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
+/**
+ * Fisher-Yates shuffle
+ */
+function shuffleArray<T>(arr: T[]): T[] {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+/**
+ * Get max value from array efficiently
+ */
+function getMaxValue(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  let max = arr[0];
+  for (let i = 1; i < arr.length; i++) {
+    if (arr[i] > max) max = arr[i];
+  }
+  return max;
+}
+
 type SonificationOptions = {
   enabled: boolean;
-  masterVolume?: number; // 0-1, default 0.5
+  masterVolume?: number;
 };
 
 type SonificationState = {
   isPlaying: boolean;
   audioContextState: AudioContextState | null;
+  bloomEnvelope: number;
+  bloomLfo: number;
 };
 
 export function useSonification(
   h1: number[] | null,
   h2: number[] | null,
+  output: number[] | null,
   options: SonificationOptions
 ): SonificationState {
   const { enabled, masterVolume = 0.5 } = options;
 
+  // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
+
+  // Interval refs
   const padIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leadIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const arpIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduledBellsRef = useRef<Set<ReturnType<typeof setTimeout>>>(
+    new Set()
+  );
+
+  // Animation ref
+  const animationRef = useRef<number | null>(null);
+
+  // Data refs (avoid stale closures)
   const h1Ref = useRef<number[]>(h1 ?? []);
   const h2Ref = useRef<number[]>(h2 ?? []);
+  const outputRef = useRef<number[]>(output ?? []);
+
+  // Trigger timestamps for visual envelope
+  const lastLeadTriggerRef = useRef<number>(0);
+  const lastPadTriggerRef = useRef<number>(0);
+  const lastArpTriggerRef = useRef<number>(0);
+
+  // Bloom values ref (avoid setState every frame)
+  const bloomValuesRef = useRef({ envelope: 0, lfo: 0 });
 
   const [state, setState] = useState<SonificationState>({
     isPlaying: false,
     audioContextState: null,
+    bloomEnvelope: 0,
+    bloomLfo: 0,
   });
 
-  // Keep refs updated
+  // Keep data refs updated
   useEffect(() => {
     h1Ref.current = h1 ?? [];
   }, [h1]);
@@ -92,11 +148,12 @@ export function useSonification(
     h2Ref.current = h2 ?? [];
   }, [h2]);
 
+  useEffect(() => {
+    outputRef.current = output ?? [];
+  }, [output]);
+
   /**
    * Create a pad synth voice
-   * - Sine oscillator
-   * - Low-pass filter at 2000Hz
-   * - Linen envelope (attack, sustain, release)
    */
   const createPadVoice = useCallback((freq: number, amp: number) => {
     const ctx = audioCtxRef.current;
@@ -109,25 +166,21 @@ export function useSonification(
     const release = 0.5;
     const duration = attack + sustain + release;
 
-    // Oscillator
     const osc = ctx.createOscillator();
     osc.type = "sine";
     osc.frequency.value = freq;
 
-    // Low-pass filter at 2000Hz
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.value = 2000;
     filter.Q.value = 0.5;
 
-    // Envelope gain
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(amp, now + attack);
     gain.gain.setValueAtTime(amp, now + attack + sustain);
     gain.gain.linearRampToValueAtTime(0, now + duration);
 
-    // Connect: osc -> filter -> gain -> master
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(master);
@@ -135,7 +188,6 @@ export function useSonification(
     osc.start(now);
     osc.stop(now + duration + 0.1);
 
-    // Cleanup
     osc.onended = () => {
       osc.disconnect();
       filter.disconnect();
@@ -144,10 +196,7 @@ export function useSonification(
   }, []);
 
   /**
-   * Create a lead synth voice
-   * - Two sine oscillators (fundamental + 2.01x harmonic)
-   * - Resonant low-pass filter with LFO modulation
-   * - Percussive envelope
+   * Create a lead synth voice (bells)
    */
   const createLeadVoice = useCallback((freq: number, amp: number) => {
     const ctx = audioCtxRef.current;
@@ -155,50 +204,47 @@ export function useSonification(
     if (!ctx || !master || amp < 0.001) return;
 
     const now = ctx.currentTime;
-
-    // LFO-derived values (simplified: random at trigger time)
-    const lfoPhase = Math.random();
-    const cutoff = 300 + lfoPhase * 1700; // 300-2000Hz range
-    const attack = 0.001 + lfoPhase * 0.029; // 0.001-0.03
-    const decay = 1.5;
+    const lfoRate = 0.15 + Math.random() * 0.7;
+    const filterCenter = 600;
+    const filterDepth = 350;
+    const attack = 0.001 + Math.random() * 0.004;
+    const decay = 1.8;
     const duration = attack + decay;
 
-    // Main oscillator
     const osc1 = ctx.createOscillator();
     osc1.type = "sine";
     osc1.frequency.value = freq;
 
-    // Harmonic oscillator (2.01x for slight detuning/richness)
     const osc2 = ctx.createOscillator();
     osc2.type = "sine";
     osc2.frequency.value = freq * 2.01;
 
-    // Mix harmonic at 0.4 amplitude
     const harmonicGain = ctx.createGain();
     harmonicGain.gain.value = 0.4;
 
-    // Mixer
     const mixer = ctx.createGain();
     mixer.gain.value = 1;
 
-    // Resonant low-pass filter
+    const lfo = ctx.createOscillator();
+    lfo.type = "triangle";
+    lfo.frequency.value = lfoRate;
+
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = filterDepth;
+
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(cutoff, now);
-    // Envelope modulates filter downward during decay (clamped to avoid negative)
-    filter.frequency.linearRampToValueAtTime(
-      Math.max(200, cutoff - 500),
-      now + duration
-    );
-    filter.Q.value = 2; // Some resonance
+    filter.frequency.value = filterCenter;
+    filter.Q.value = 5;
 
-    // Percussive envelope (perc: quick attack, exponential decay)
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(amp, now + attack);
+    gain.gain.setValueAtTime(amp * 1.5, now);
+    gain.gain.setValueAtTime(amp, now + attack);
     gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
-    // Connect
     osc1.connect(mixer);
     osc2.connect(harmonicGain);
     harmonicGain.connect(mixer);
@@ -208,13 +254,17 @@ export function useSonification(
 
     osc1.start(now);
     osc2.start(now);
+    lfo.start(now);
+
     osc1.stop(now + duration + 0.1);
     osc2.stop(now + duration + 0.1);
+    lfo.stop(now + duration + 0.1);
 
-    // Cleanup
     osc1.onended = () => {
       osc1.disconnect();
       osc2.disconnect();
+      lfo.disconnect();
+      lfoGain.disconnect();
       harmonicGain.disconnect();
       mixer.disconnect();
       filter.disconnect();
@@ -223,90 +273,239 @@ export function useSonification(
   }, []);
 
   /**
-   * Run pad routine once
-   * Iterates through h1 and h2, creating pad voices
+   * Create a soft bell voice for arpeggio
+   */
+  const createSoftBellVoice = useCallback((freq: number, amp: number) => {
+    const ctx = audioCtxRef.current;
+    const master = masterGainRef.current;
+    if (!ctx || !master || amp < 0.001) return;
+
+    const now = ctx.currentTime;
+    const lfoRate = 0.2 + Math.random() * 0.4;
+    const filterCenter = 800;
+    const filterDepth = 300;
+    const attack = 0.005 + Math.random() * 0.01;
+    const decay = 1.2;
+    const duration = attack + decay;
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.value = freq;
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.value = freq * 2.01;
+
+    const harmonicGain = ctx.createGain();
+    harmonicGain.gain.value = 0.3;
+
+    const mixer = ctx.createGain();
+    mixer.gain.value = 1;
+
+    const lfo = ctx.createOscillator();
+    lfo.type = "triangle";
+    lfo.frequency.value = lfoRate;
+
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = filterDepth;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = filterCenter;
+    filter.Q.value = 3;
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(amp, now + attack);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    osc1.connect(mixer);
+    osc2.connect(harmonicGain);
+    harmonicGain.connect(mixer);
+    mixer.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+
+    osc1.start(now);
+    osc2.start(now);
+    lfo.start(now);
+
+    osc1.stop(now + duration + 0.1);
+    osc2.stop(now + duration + 0.1);
+    lfo.stop(now + duration + 0.1);
+
+    osc1.onended = () => {
+      osc1.disconnect();
+      osc2.disconnect();
+      lfo.disconnect();
+      lfoGain.disconnect();
+      harmonicGain.disconnect();
+      mixer.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
+  }, []);
+
+  /**
+   * Schedule a soft bell note with cleanup tracking
+   */
+  const createScheduledBell = useCallback(
+    (freq: number, amp: number, delayTime: number) => {
+      if (!audioCtxRef.current) return;
+
+      const timeoutId = setTimeout(() => {
+        scheduledBellsRef.current.delete(timeoutId);
+        createSoftBellVoice(freq, amp);
+      }, delayTime * 1000);
+
+      scheduledBellsRef.current.add(timeoutId);
+    },
+    [createSoftBellVoice]
+  );
+
+  /**
+   * Clear all scheduled bells
+   */
+  const clearScheduledBells = useCallback(() => {
+    scheduledBellsRef.current.forEach((id) => clearTimeout(id));
+    scheduledBellsRef.current.clear();
+  }, []);
+
+  /**
+   * Run pad routine
    */
   const runPadRoutine = useCallback(() => {
     const h1Data = h1Ref.current;
     const h2Data = h2Ref.current;
+    let triggered = false;
 
-    // h1: MIDI note = index, amp = value * 0.002
     h1Data.forEach((v, i) => {
       if (v > 0.01) {
-        const midiNote = quantize(i);
-        const freq = midiToFreq(midiNote);
-        createPadVoice(freq, v * 0.002 * masterVolume);
+        const freq = midiToFreq(quantize(i));
+        createPadVoice(freq, v * 0.001 * masterVolume);
+        triggered = true;
       }
     });
 
-    // h2: MIDI note = index + 36, amp = value * 0.001
     h2Data.forEach((v, i) => {
       if (v > 0.01) {
-        const midiNote = quantize(i + 36);
-        const freq = midiToFreq(midiNote);
-        createPadVoice(freq, v * 0.001 * masterVolume);
+        const freq = midiToFreq(quantize(i + 36));
+        createPadVoice(freq, v * 0.0005 * masterVolume);
+        triggered = true;
       }
     });
+
+    if (triggered) {
+      lastPadTriggerRef.current = performance.now();
+    }
   }, [createPadVoice, masterVolume]);
 
   /**
-   * Run lead routine once
-   * Iterates through h1, creating lead voices
+   * Run lead routine
    */
   const runLeadRoutine = useCallback(() => {
     const h1Data = h1Ref.current;
+    let triggered = false;
 
-    // h1: MIDI note = index + 24, amp = value * 0.02
     h1Data.forEach((v, i) => {
       if (v > 0.05) {
-        const midiNote = quantize(i + 24);
-        const freq = midiToFreq(midiNote);
-        createLeadVoice(freq, v * 0.02 * masterVolume);
+        const freq = midiToFreq(quantize(i + 24));
+        createLeadVoice(freq, v * 0.0025 * masterVolume);
+        triggered = true;
       }
     });
+
+    if (triggered) {
+      lastLeadTriggerRef.current = performance.now();
+    }
   }, [createLeadVoice, masterVolume]);
 
   /**
-   * Schedule next pad iteration with random interval
+   * Run arpeggio routine
+   */
+  const runArpRoutine = useCallback(() => {
+    const outputData = outputRef.current;
+    if (!outputData.length) return;
+
+    const activeNotes: { index: number; amp: number }[] = [];
+    outputData.forEach((v, i) => {
+      if (v > 0.2) {
+        activeNotes.push({ index: i, amp: v });
+      }
+    });
+
+    if (activeNotes.length === 0) return;
+
+    lastArpTriggerRef.current = performance.now();
+
+    // Random sequence with 2-4 repetitions
+    const repetitions = Math.floor(rrand(2, 5));
+    const arpPattern: typeof activeNotes = [];
+    for (let r = 0; r < repetitions; r++) {
+      arpPattern.push(...shuffleArray(activeNotes));
+    }
+
+    // Schedule with timing variation
+    const baseInterval = 0.12;
+    let accumulatedTime = 0;
+    arpPattern.forEach((note) => {
+      const freq = midiToFreq(quantize(note.index + 60));
+      const amp = note.amp * 0.08 * masterVolume;
+      createScheduledBell(freq, amp, accumulatedTime);
+      accumulatedTime += baseInterval * rrand(0.7, 1.4);
+    });
+  }, [createScheduledBell, masterVolume]);
+
+  /**
+   * Schedule pad routine
    */
   const schedulePad = useCallback(() => {
     if (!enabled || !audioCtxRef.current) return;
-
     runPadRoutine();
-
-    // Schedule next: 4-5 seconds
     const nextInterval = rrand(4000, 5000);
     padIntervalRef.current = setTimeout(schedulePad, nextInterval);
   }, [enabled, runPadRoutine]);
 
   /**
-   * Schedule next lead iteration with random interval
+   * Schedule lead routine
    */
   const scheduleLead = useCallback(() => {
     if (!enabled || !audioCtxRef.current) return;
-
     runLeadRoutine();
-
-    // Schedule next: 0.1-1.1 seconds
     const nextInterval = rrand(100, 1100);
     leadIntervalRef.current = setTimeout(scheduleLead, nextInterval);
   }, [enabled, runLeadRoutine]);
 
   /**
-   * Initialize or resume audio context
+   * Schedule arp routine (confidence-scaled interval)
+   */
+  const scheduleArp = useCallback(() => {
+    if (!enabled || !audioCtxRef.current) return;
+    runArpRoutine();
+
+    const maxConfidence = getMaxValue(outputRef.current) || 0.5;
+    const confidenceMultiplier = 1 + (1 - Math.max(0.1, maxConfidence)) * 4;
+    const baseInterval = rrand(1000, 2000);
+    const nextInterval = baseInterval * confidenceMultiplier;
+
+    arpIntervalRef.current = setTimeout(scheduleArp, nextInterval);
+  }, [enabled, runArpRoutine]);
+
+  /**
+   * Initialize audio context
    */
   const initAudio = useCallback(async () => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new AudioContext();
-
-      // Create master gain
       const master = audioCtxRef.current.createGain();
       master.gain.value = 1;
       master.connect(audioCtxRef.current.destination);
       masterGainRef.current = master;
     }
 
-    // Resume if suspended (browser autoplay policy)
     if (audioCtxRef.current.state === "suspended") {
       await audioCtxRef.current.resume();
     }
@@ -315,23 +514,111 @@ export function useSonification(
   }, []);
 
   /**
+   * Compute envelope value
+   */
+  const computeEnvelope = useCallback(
+    (triggerTime: number, duration: number): number => {
+      if (triggerTime === 0) return 0;
+      const elapsed = (performance.now() - triggerTime) / 1000;
+      if (elapsed > duration) return 0;
+
+      const attackTime = 0.01;
+      if (elapsed < attackTime) {
+        return elapsed / attackTime;
+      }
+
+      const decayElapsed = elapsed - attackTime;
+      const decayDuration = duration - attackTime;
+      return Math.exp((-4 * decayElapsed) / decayDuration);
+    },
+    []
+  );
+
+  /**
+   * Animation loop for bloom values
+   */
+  const startAnimation = useCallback(() => {
+    let lastUpdate = 0;
+    const UPDATE_INTERVAL = 50; // Update React state at 20fps max
+
+    const animate = (timestamp: number) => {
+      const now = performance.now();
+
+      // Compute envelope values
+      const leadEnv = computeEnvelope(
+        lastLeadTriggerRef.current,
+        LEAD_DURATION
+      );
+      const padEnv = computeEnvelope(lastPadTriggerRef.current, PAD_DURATION);
+      const arpEnv = computeEnvelope(lastArpTriggerRef.current, LEAD_DURATION);
+      const bloomEnvelope = Math.max(leadEnv, padEnv, arpEnv);
+
+      // Compute LFO
+      let bloomLfo = 0;
+      if (bloomEnvelope > 0.01) {
+        const mostRecentTrigger = Math.max(
+          lastLeadTriggerRef.current,
+          lastPadTriggerRef.current,
+          lastArpTriggerRef.current
+        );
+        const lfoElapsed = (now - mostRecentTrigger) / 1000;
+        const phase = (lfoElapsed * LFO_RATE) % 1;
+        bloomLfo = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+      }
+
+      // Store in ref (always updated)
+      bloomValuesRef.current = { envelope: bloomEnvelope, lfo: bloomLfo };
+
+      // Throttle React state updates
+      if (timestamp - lastUpdate > UPDATE_INTERVAL) {
+        lastUpdate = timestamp;
+        setState((prev) => ({
+          ...prev,
+          bloomEnvelope,
+          bloomLfo,
+        }));
+      }
+
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+  }, [computeEnvelope]);
+
+  /**
+   * Stop animation
+   */
+  const stopAnimation = useCallback(() => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    bloomValuesRef.current = { envelope: 0, lfo: 0 };
+    setState((prev) => ({ ...prev, bloomEnvelope: 0, bloomLfo: 0 }));
+  }, []);
+
+  /**
    * Start/stop based on enabled state
    */
   useEffect(() => {
     if (enabled) {
-      // Start sonification
       initAudio().then(() => {
         setState({
           isPlaying: true,
           audioContextState: audioCtxRef.current?.state ?? null,
+          bloomEnvelope: 0,
+          bloomLfo: 0,
         });
 
-        // Start routines with slight offset to avoid initial burst
+        startAnimation();
         setTimeout(schedulePad, 500);
         setTimeout(scheduleLead, 200);
+        setTimeout(scheduleArp, 800);
       });
     } else {
-      // Stop sonification
+      stopAnimation();
+      clearScheduledBells();
+
       if (padIntervalRef.current) {
         clearTimeout(padIntervalRef.current);
         padIntervalRef.current = null;
@@ -340,36 +627,53 @@ export function useSonification(
         clearTimeout(leadIntervalRef.current);
         leadIntervalRef.current = null;
       }
+      if (arpIntervalRef.current) {
+        clearTimeout(arpIntervalRef.current);
+        arpIntervalRef.current = null;
+      }
 
       setState({
         isPlaying: false,
         audioContextState: audioCtxRef.current?.state ?? null,
+        bloomEnvelope: 0,
+        bloomLfo: 0,
       });
     }
 
     return () => {
-      if (padIntervalRef.current) {
-        clearTimeout(padIntervalRef.current);
-      }
-      if (leadIntervalRef.current) {
-        clearTimeout(leadIntervalRef.current);
-      }
+      stopAnimation();
+      clearScheduledBells();
+      if (padIntervalRef.current) clearTimeout(padIntervalRef.current);
+      if (leadIntervalRef.current) clearTimeout(leadIntervalRef.current);
+      if (arpIntervalRef.current) clearTimeout(arpIntervalRef.current);
     };
-  }, [enabled, initAudio, schedulePad, scheduleLead]);
+  }, [
+    enabled,
+    initAudio,
+    schedulePad,
+    scheduleLead,
+    scheduleArp,
+    startAnimation,
+    stopAnimation,
+    clearScheduledBells,
+  ]);
 
   /**
    * Cleanup on unmount
    */
   useEffect(() => {
     return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      clearScheduledBells();
       if (padIntervalRef.current) clearTimeout(padIntervalRef.current);
       if (leadIntervalRef.current) clearTimeout(leadIntervalRef.current);
+      if (arpIntervalRef.current) clearTimeout(arpIntervalRef.current);
       if (audioCtxRef.current) {
         audioCtxRef.current.close();
         audioCtxRef.current = null;
       }
     };
-  }, []);
+  }, [clearScheduledBells]);
 
   return state;
 }
