@@ -64,6 +64,7 @@ export type CanvasUpdatePayload = {
 export type ChordTriggerPayload = {
   output?: number[];
   instrument?: string;
+  octave?: number;
 };
 
 /**
@@ -74,6 +75,7 @@ export type ChordPlayedEvent = {
   instrument: string;
   output: number[];
   username: string;
+  octave: number;
 };
 
 /**

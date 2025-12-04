@@ -11,28 +11,31 @@ import type { ChordPlayedEvent } from "@/types/network";
  * - Soft bell: dual sine + LFO-modulated LPF (for lead/bass instruments)
  */
 
-// Natural minor scale degrees (semitones from root)
-const SCALE = [0, 2, 3, 5, 7, 8, 10];
+/**
+ * Direct mapping from digit (0-9) to semitones from C.
+ * Uses natural minor scale spanning 1.5 octaves for 10 unique notes.
+ * Scale: C, D, Eb, F, G, Ab, Bb, C, D, Eb (no duplicates within the 10)
+ */
+const DIGIT_TO_SEMITONE: Record<number, number> = {
+  0: 0,   // C
+  1: 2,   // D
+  2: 3,   // Eb
+  3: 5,   // F
+  4: 7,   // G
+  5: 8,   // Ab
+  6: 10,  // Bb
+  7: 12,  // C (next octave)
+  8: 14,  // D (next octave)
+  9: 15,  // Eb (next octave)
+};
 
 /**
- * Quantize a MIDI note to the nearest scale degree
+ * Get MIDI note for a digit with octave offset
  */
-function quantize(midiNote: number): number {
-  const octave = Math.floor(midiNote / 12);
-  const degree = midiNote % 12;
-
-  let nearestDeg = SCALE[0];
-  let minDist = Math.abs(SCALE[0] - degree);
-
-  for (const d of SCALE) {
-    const dist = Math.abs(d - degree);
-    if (dist < minDist) {
-      minDist = dist;
-      nearestDeg = d;
-    }
-  }
-
-  return octave * 12 + nearestDeg;
+function digitToMidi(digit: number, octaveOffset: number = 0): number {
+  const baseMidi = 48; // C3
+  const semitone = DIGIT_TO_SEMITONE[digit] ?? 0;
+  return baseMidi + semitone + (octaveOffset * 12);
 }
 
 /**
@@ -305,7 +308,7 @@ export function useConductorSonification(
         audioCtxRef.current.resume();
       }
 
-      const { instrument, output } = event;
+      const { instrument, output, octave = 0 } = event;
       if (!output || output.length === 0) {
         console.log("[ConductorAudio] Skipped: no output data");
         return;
@@ -315,13 +318,13 @@ export function useConductorSonification(
       const voiceType: "pad" | "bell" =
         instrument === "pad" || instrument === "drone" ? "pad" : "bell";
       
-      console.log("[ConductorAudio] Playing:", voiceType, "for", instrument);
+      console.log("[ConductorAudio] Playing:", voiceType, "for", instrument, "octave:", octave);
 
       // Get active notes (activation > 0.2)
-      const activeNotes: { index: number; amp: number }[] = [];
+      const activeNotes: { digit: number; amp: number }[] = [];
       output.forEach((v, i) => {
         if (v > 0.2) {
-          activeNotes.push({ index: i, amp: v });
+          activeNotes.push({ digit: i, amp: v });
         }
       });
 
@@ -330,7 +333,8 @@ export function useConductorSonification(
       if (voiceType === "pad") {
         // Play all pad notes together (chord)
         activeNotes.forEach((note) => {
-          const freq = midiToFreq(quantize(note.index + 48)); // C3 base
+          const midi = digitToMidi(note.digit, octave);
+          const freq = midiToFreq(midi);
           const amp = note.amp * 0.15 * masterVolume;
           createPadVoice(freq, amp);
         });
@@ -345,7 +349,8 @@ export function useConductorSonification(
         const baseInterval = 0.1;
         let accumulatedTime = 0;
         arpPattern.forEach((note) => {
-          const freq = midiToFreq(quantize(note.index + 60)); // C4 base
+          const midi = digitToMidi(note.digit, octave);
+          const freq = midiToFreq(midi);
           const amp = note.amp * 0.1 * masterVolume;
           scheduleNote(freq, amp, accumulatedTime, "bell");
           accumulatedTime += baseInterval * rrand(0.7, 1.4);

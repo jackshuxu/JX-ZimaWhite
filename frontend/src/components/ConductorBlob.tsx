@@ -109,6 +109,7 @@ export function ConductorBlob({
         glowColor: number;
         material: THREE.LineBasicMaterial;
         lastImageUrl: string | null;
+        lastInstrument: string;
       }
     >
   >(new Map());
@@ -443,20 +444,21 @@ export function ConductorBlob({
         glowColor: 0xffffff,
         material: lineMaterial,
         lastImageUrl: participant.imageUrl,
+        lastInstrument: participant.instrument,
       });
     },
     []
   );
 
   /**
-   * Update a participant's texture if their image changed
+   * Update a participant's texture and label if changed
    */
-  const updateParticipantTexture = useCallback(
-    (participant: CanvasParticipant) => {
-      const conn = connectionMapRef.current.get(participant.id);
-      if (!conn || conn.lastImageUrl === participant.imageUrl) return;
+  const updateParticipant = useCallback((participant: CanvasParticipant) => {
+    const conn = connectionMapRef.current.get(participant.id);
+    if (!conn) return;
 
-      // Image URL changed, update texture
+    // Update texture if image changed
+    if (conn.lastImageUrl !== participant.imageUrl) {
       const canvasMat = conn.canvasMesh.material as THREE.MeshBasicMaterial;
 
       if (participant.imageUrl && textureLoaderRef.current) {
@@ -490,9 +492,18 @@ export function ConductorBlob({
       }
 
       conn.lastImageUrl = participant.imageUrl;
-    },
-    []
-  );
+    }
+
+    // Update label if instrument changed
+    if (conn.lastInstrument !== participant.instrument) {
+      const labelDiv = conn.labelObject.element;
+      const instrumentSpan = labelDiv.querySelector("div:last-child");
+      if (instrumentSpan) {
+        instrumentSpan.textContent = participant.instrument;
+      }
+      conn.lastInstrument = participant.instrument;
+    }
+  }, []);
 
   /**
    * Update participant canvases and connections (incremental)
@@ -528,7 +539,7 @@ export function ConductorBlob({
       // Just update textures for existing participants
       participants.slice(0, 25).forEach((p) => {
         if (connectionMapRef.current.has(p.id)) {
-          updateParticipantTexture(p);
+          updateParticipant(p);
         } else {
           // New participant (shouldn't happen if counts match, but be safe)
           createParticipant(p, connectionMapRef.current.size, numParticipants);
@@ -538,12 +549,7 @@ export function ConductorBlob({
 
     // Update tracked IDs for ordering
     trackedIdsRef.current = participants.slice(0, 25).map((p) => p.id);
-  }, [
-    participants,
-    removeParticipant,
-    createParticipant,
-    updateParticipantTexture,
-  ]);
+  }, [participants, removeParticipant, createParticipant, updateParticipant]);
 
   /**
    * Trigger an impulse from a specific participant

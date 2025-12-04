@@ -16,6 +16,7 @@ export default function UserPage() {
 
   const [username, setUsername] = useState("");
   const [instrument, setInstrument] = useState<Instrument>("pad");
+  const [octave, setOctave] = useState(0); // -2 to +2 range
   const [connected, setConnected] = useState(false);
   const [lastTrigger, setLastTrigger] = useState<number | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -40,6 +41,7 @@ export default function UserPage() {
   }, [router]);
 
   const lastCanvasEmitRef = useRef(0);
+  const pendingUpdateRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const socket = useMemo(() => getSocket(), []);
 
   // Join crowd room on mount
@@ -88,19 +90,41 @@ export default function UserPage() {
     };
   }, [socket, username, instrument]);
 
-  // Send canvas updates (throttled)
+  // Send canvas updates (throttled with pending retry)
   useEffect(() => {
     if (!activations || !connected) return;
 
-    const now = Date.now();
-    if (now - lastCanvasEmitRef.current < 200) return; // 200ms throttle
-    lastCanvasEmitRef.current = now;
+    const sendUpdate = () => {
+      lastCanvasEmitRef.current = Date.now();
+      socket.emit("canvas:update", {
+        canvas: canvasData,
+        output: activations.output,
+        instrument,
+      });
+    };
 
-    socket.emit("canvas:update", {
-      canvas: canvasData,
-      output: activations.output,
-      instrument,
-    });
+    const now = Date.now();
+    const timeSinceLast = now - lastCanvasEmitRef.current;
+
+    // Clear any pending update
+    if (pendingUpdateRef.current) {
+      clearTimeout(pendingUpdateRef.current);
+      pendingUpdateRef.current = null;
+    }
+
+    if (timeSinceLast >= 200) {
+      // Enough time passed, send immediately
+      sendUpdate();
+    } else {
+      // Schedule update after throttle period
+      pendingUpdateRef.current = setTimeout(sendUpdate, 200 - timeSinceLast);
+    }
+
+    return () => {
+      if (pendingUpdateRef.current) {
+        clearTimeout(pendingUpdateRef.current);
+      }
+    };
   }, [activations, canvasData, connected, instrument, socket]);
 
   // Handle chord trigger
@@ -109,14 +133,15 @@ export default function UserPage() {
     socket.emit("chord:trigger", {
       output: activations.output,
       instrument,
+      octave,
     });
     setTriggerFlash(true);
     setTimeout(() => setTriggerFlash(false), 150);
-  }, [activations, instrument, socket, triggerFlash]);
+  }, [activations, instrument, octave, socket, triggerFlash]);
 
   // Handle canvas clear
   const handleClear = useCallback(() => {
-    // Canvas clears itself, this is just for any additional logic
+    // State updates trigger the throttled canvas update effect
   }, []);
 
   // Flash feedback on trigger (unused but kept for potential future use)
@@ -196,6 +221,40 @@ export default function UserPage() {
                 {inst}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Octave control */}
+        <div className="space-y-2">
+          <label className="text-xs uppercase tracking-widest text-gray-500">
+            Octave
+          </label>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setOctave((o) => Math.max(-2, o - 1))}
+              disabled={octave <= -2}
+              className={`border px-4 py-2 text-sm font-bold transition-colors ${
+                octave <= -2
+                  ? "border-white/10 text-gray-600 cursor-not-allowed"
+                  : "border-white/30 text-white hover:border-white hover:bg-white/10"
+              }`}
+            >
+              −
+            </button>
+            <span className="w-12 text-center text-lg font-mono">
+              {octave > 0 ? `+${octave}` : octave}
+            </span>
+            <button
+              onClick={() => setOctave((o) => Math.min(2, o + 1))}
+              disabled={octave >= 2}
+              className={`border px-4 py-2 text-sm font-bold transition-colors ${
+                octave >= 2
+                  ? "border-white/10 text-gray-600 cursor-not-allowed"
+                  : "border-white/30 text-white hover:border-white hover:bg-white/10"
+              }`}
+            >
+              +
+            </button>
           </div>
         </div>
 

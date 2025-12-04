@@ -186,6 +186,8 @@ async def handle_chord_trigger(sid, data):
     payload = data or {}
     output = payload.get("output")
     instrument = payload.get("instrument")
+    octave = payload.get("octave", 0)  # Default to octave 0
+    
     if output is not None or instrument is not None:
         manager.update_participant(
             socket_id=sid,
@@ -211,6 +213,7 @@ async def handle_chord_trigger(sid, data):
             "instrument": chord.instrument,
             "output": chord.output,
             "username": participant.username,
+            "octave": octave,
         },
         room="crowd",
     )
