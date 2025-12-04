@@ -5,6 +5,7 @@ import Link from "next/link";
 import { DrawingCanvas } from "@/components/DrawingCanvas";
 import { NeuralNetwork3D } from "@/components/NeuralNetwork3D";
 import { useNetwork } from "@/hooks/useNetwork";
+import { useSonification } from "@/hooks/useSonification";
 import { getSocket } from "@/lib/socket";
 import type { SoloActivationPayload } from "@/types/network";
 
@@ -22,6 +23,8 @@ export default function SoloPage() {
   const { activations, error } = useNetwork(inputArr);
   const lastEmitRef = useRef(0);
   const [connected, setConnected] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [volume, setVolume] = useState(0.5);
 
   // Detect if canvas is empty
   const canvasEmpty = useMemo(() => isCanvasEmpty(inputArr), [inputArr]);
@@ -91,6 +94,13 @@ export default function SoloPage() {
     return activations;
   }, [activations, canvasEmpty]);
 
+  // Web Audio sonification
+  const { isPlaying } = useSonification(
+    displayActivations?.hidden1 ?? null,
+    displayActivations?.hidden2 ?? null,
+    { enabled: audioEnabled, masterVolume: volume }
+  );
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
       {/* Full-screen 3D Background */}
@@ -120,12 +130,49 @@ export default function SoloPage() {
             </span>
             {error && <span className="text-red-400">{error}</span>}
           </div>
-          <Link
-            href="/conductor"
-            className="border border-white/30 bg-black/50 px-4 py-2 text-xs uppercase tracking-widest backdrop-blur-sm transition-colors hover:border-white hover:bg-white/10"
-          >
-            → CONDUCTOR
-          </Link>
+
+          <div className="flex items-center gap-4">
+            {/* Audio Controls */}
+            <div className="flex items-center gap-3 border border-white/20 bg-black/60 px-4 py-2 backdrop-blur-md">
+              <button
+                onClick={() => setAudioEnabled(!audioEnabled)}
+                className={`flex items-center gap-2 text-xs uppercase tracking-widest transition-colors ${
+                  audioEnabled
+                    ? "text-cyan-400"
+                    : "text-gray-500 hover:text-white"
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full transition-colors ${
+                    isPlaying ? "bg-cyan-400 animate-pulse" : "bg-gray-600"
+                  }`}
+                />
+                {audioEnabled ? "Audio On" : "Audio Off"}
+              </button>
+
+              {audioEnabled && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-500">VOL</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={volume}
+                    onChange={(e) => setVolume(parseFloat(e.target.value))}
+                    className="h-1 w-16 cursor-pointer appearance-none rounded bg-white/20 accent-cyan-400"
+                  />
+                </div>
+              )}
+            </div>
+
+            <Link
+              href="/conductor"
+              className="border border-white/30 bg-black/50 px-4 py-2 text-xs uppercase tracking-widest backdrop-blur-sm transition-colors hover:border-white hover:bg-white/10"
+            >
+              → CONDUCTOR
+            </Link>
+          </div>
         </header>
 
         {/* Left-aligned control panel */}
