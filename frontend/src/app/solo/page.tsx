@@ -8,11 +8,23 @@ import { useNetwork } from "@/hooks/useNetwork";
 import { getSocket } from "@/lib/socket";
 import type { SoloActivationPayload } from "@/types/network";
 
+// Threshold to detect if canvas has meaningful content
+const EMPTY_THRESHOLD = 0.01;
+
+function isCanvasEmpty(input: number[]): boolean {
+  // Sum all pixel values - if below threshold, canvas is effectively empty
+  const sum = input.reduce((acc, val) => acc + val, 0);
+  return sum < EMPTY_THRESHOLD;
+}
+
 export default function SoloPage() {
   const [inputArr, setInputArr] = useState<number[]>(Array(784).fill(0));
   const { activations, error } = useNetwork(inputArr);
   const lastEmitRef = useRef(0);
   const [connected, setConnected] = useState(false);
+
+  // Detect if canvas is empty
+  const canvasEmpty = useMemo(() => isCanvasEmpty(inputArr), [inputArr]);
 
   const socket = useMemo(() => getSocket(), []);
 
@@ -34,29 +46,50 @@ export default function SoloPage() {
     };
   }, [socket]);
 
-  // Stream activations to backend (throttled)
+  // Stream activations to backend (throttled) - send zeros when canvas is empty
   useEffect(() => {
-    if (!activations || !connected) return;
+    if (!connected) return;
+    if (!activations && !canvasEmpty) return; // Wait for activations unless canvas is empty
 
     const now = Date.now();
     if (now - lastEmitRef.current < 100) return; // 100ms throttle
     lastEmitRef.current = now;
 
-    const payload: SoloActivationPayload = {
-      hidden1: activations.hidden1,
-      hidden2: activations.hidden2,
-      output: activations.output,
-    };
-    socket.emit("solo:activation", payload);
-  }, [activations, connected, socket]);
+    // Send zeroed activations when canvas is empty, otherwise send real activations
+    const payload: SoloActivationPayload = canvasEmpty
+      ? {
+          hidden1: Array(128).fill(0),
+          hidden2: Array(16).fill(0),
+          output: Array(10).fill(0),
+        }
+      : {
+          hidden1: activations!.hidden1,
+          hidden2: activations!.hidden2,
+          output: activations!.output,
+        };
 
-  // Get prediction from output layer
+    socket.emit("solo:activation", payload);
+  }, [activations, connected, socket, canvasEmpty]);
+
+  // Get prediction from output layer - null if canvas is empty
   const prediction = useMemo(() => {
-    if (!activations?.output?.length) return null;
+    if (!activations?.output?.length || canvasEmpty) return null;
     const max = Math.max(...activations.output);
     const idx = activations.output.indexOf(max);
     return { digit: idx, confidence: max };
-  }, [activations]);
+  }, [activations, canvasEmpty]);
+
+  // Zero activations for empty canvas state
+  const displayActivations = useMemo(() => {
+    if (canvasEmpty) {
+      return {
+        hidden1: Array(128).fill(0),
+        hidden2: Array(16).fill(0),
+        output: Array(10).fill(0),
+      };
+    }
+    return activations;
+  }, [activations, canvasEmpty]);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -64,10 +97,10 @@ export default function SoloPage() {
       <div className="fixed inset-0 z-0">
         <NeuralNetwork3D
           layers={{
-            input: inputArr,
-            hidden1: activations?.hidden1,
-            hidden2: activations?.hidden2,
-            output: activations?.output,
+            input: canvasEmpty ? Array(784).fill(0) : inputArr,
+            hidden1: displayActivations?.hidden1,
+            hidden2: displayActivations?.hidden2,
+            output: displayActivations?.output,
           }}
         />
       </div>
