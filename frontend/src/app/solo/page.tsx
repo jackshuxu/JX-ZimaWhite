@@ -59,49 +59,24 @@ export default function SoloPage() {
   }, [activations]);
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-6 py-8 lg:flex-row">
-        {/* Left: Canvas and controls */}
-        <div className="flex-1 space-y-6">
-          <header className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.5em] text-gray-500">
-                SOLO MODE
-              </p>
-              <h1 className="mt-1 text-2xl font-bold uppercase tracking-widest">
-                Neural Constellation
-              </h1>
-            </div>
-            <Link
-              href="/conductor"
-              className="border border-white/30 px-4 py-2 text-xs uppercase tracking-widest transition-colors hover:border-white hover:bg-white/5"
-            >
-              → CONDUCTOR
-            </Link>
-          </header>
+    <main className="relative min-h-screen overflow-hidden bg-black text-white">
+      {/* Full-screen 3D Background */}
+      <div className="fixed inset-0 z-0">
+        <NeuralNetwork3D
+          layers={{
+            input: inputArr,
+            hidden1: activations?.hidden1,
+            hidden2: activations?.hidden2,
+            output: activations?.output,
+          }}
+        />
+      </div>
 
-          <div className="border border-white/10 p-6">
-            <p className="mb-4 text-xs uppercase tracking-widest text-gray-500">
-              Draw Digit
-            </p>
-            <DrawingCanvas width={360} height={360} onChange={setInputArr} />
-          </div>
-
-          {/* Prediction display */}
-          {prediction && (
-            <div className="border border-white/10 p-6 text-center">
-              <p className="text-xs uppercase tracking-widest text-gray-500">
-                Network Prediction
-              </p>
-              <p className="mt-2 text-6xl font-bold">{prediction.digit}</p>
-              <p className="mt-1 text-sm text-gray-400">
-                {(prediction.confidence * 100).toFixed(1)}% confidence
-              </p>
-            </div>
-          )}
-
-          {/* Status */}
-          <div className="flex items-center gap-4 text-xs text-gray-500">
+      {/* Floating UI Layer */}
+      <div className="relative z-10 flex min-h-screen flex-col p-6">
+        {/* Top bar */}
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-4 text-xs text-gray-400">
             <span
               className={`h-2 w-2 rounded-full ${
                 connected ? "bg-green-500" : "bg-red-500"
@@ -112,24 +87,42 @@ export default function SoloPage() {
             </span>
             {error && <span className="text-red-400">{error}</span>}
           </div>
-        </div>
+          <Link
+            href="/conductor"
+            className="border border-white/30 bg-black/50 px-4 py-2 text-xs uppercase tracking-widest backdrop-blur-sm transition-colors hover:border-white hover:bg-white/10"
+          >
+            → CONDUCTOR
+          </Link>
+        </header>
 
-        {/* Right: 3D Visualization */}
-        <div className="flex-1 border border-white/10">
-          <div className="p-4">
-            <p className="text-xs uppercase tracking-widest text-gray-500">
-              Neural Lattice
-            </p>
-          </div>
-          <div className="h-[600px]">
-            <NeuralNetwork3D
-              layers={{
-                input: inputArr,
-                hidden1: activations?.hidden1,
-                hidden2: activations?.hidden2,
-                output: activations?.output,
-              }}
-            />
+        {/* Left-aligned control panel */}
+        <div className="flex flex-1 items-center justify-start pl-6">
+          <div className="border border-white/20 bg-black/60 backdrop-blur-md">
+            {/* Digit Canvas */}
+            <div className="p-6">
+              <p className="mb-4 text-xs uppercase tracking-widest text-gray-500">
+                Digit Canvas
+              </p>
+              <DrawingCanvas width={320} height={320} onChange={setInputArr} />
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-white/10" />
+
+            {/* Network Prediction */}
+            <div className="p-6 text-center">
+              <p className="text-xs uppercase tracking-widest text-gray-500">
+                Network Prediction
+              </p>
+              <p className="mt-3 text-7xl font-bold tabular-nums">
+                {prediction?.digit ?? "—"}
+              </p>
+              <p className="mt-2 text-sm text-gray-400">
+                {prediction
+                  ? `${(prediction.confidence * 100).toFixed(1)}% confidence`
+                  : "Draw to predict"}
+              </p>
+            </div>
           </div>
         </div>
       </div>
