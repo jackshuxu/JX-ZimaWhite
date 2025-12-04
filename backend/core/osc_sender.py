@@ -41,6 +41,15 @@ class OscSender:
             self._send_vector("/solo/hidden1", hidden1)
             self._send_vector("/solo/hidden2", hidden2)
             self._send_vector("/solo/output", output)
+            prediction = max(range(len(output)), key=lambda i: output[i])
+            logger.info(
+                "OSC solo → hidden1[%d] hidden2[%d] output[%d] (pred: %d, conf: %.1f%%)",
+                len(hidden1),
+                len(hidden2),
+                len(output),
+                prediction,
+                max(output) * 100,
+            )
         except OSError as exc:
             logger.error("OSC solo send failed (%s:%s): %s", self.host, self.port, exc)
 
@@ -63,6 +72,13 @@ class OscSender:
         payload.extend(float(v) for v in output)
         try:
             self.client.send_message(address, payload)
+            logger.info(
+                "OSC crowd → %s [%s] (user: %s, top: %.1f%%)",
+                address,
+                len(output),
+                username or "anon",
+                max(output) * 100,
+            )
         except OSError as exc:
             logger.error(
                 "OSC crowd send failed (%s:%s -> %s): %s",
