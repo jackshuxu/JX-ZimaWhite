@@ -225,15 +225,15 @@ export default function UserPage() {
         </div>
 
         {/* Octave control */}
-        <div className="space-y-2">
+        <div className="flex items-center gap-2">
           <label className="text-xs uppercase tracking-widest text-gray-500">
-            Octave
+            Oct
           </label>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setOctave((o) => Math.max(-2, o - 1))}
               disabled={octave <= -2}
-              className={`border px-4 py-2 text-sm font-bold transition-colors ${
+              className={`border px-2 py-1 text-xs font-bold transition-colors ${
                 octave <= -2
                   ? "border-white/10 text-gray-600 cursor-not-allowed"
                   : "border-white/30 text-white hover:border-white hover:bg-white/10"
@@ -241,13 +241,13 @@ export default function UserPage() {
             >
               −
             </button>
-            <span className="w-12 text-center text-lg font-mono">
+            <span className="w-8 text-center text-sm font-mono">
               {octave > 0 ? `+${octave}` : octave}
             </span>
             <button
               onClick={() => setOctave((o) => Math.min(2, o + 1))}
               disabled={octave >= 2}
-              className={`border px-4 py-2 text-sm font-bold transition-colors ${
+              className={`border px-2 py-1 text-xs font-bold transition-colors ${
                 octave >= 2
                   ? "border-white/10 text-gray-600 cursor-not-allowed"
                   : "border-white/30 text-white hover:border-white hover:bg-white/10"
@@ -335,11 +335,13 @@ export default function UserPage() {
               <button
                 onClick={handleTrigger}
                 disabled={!connected || triggerFlash}
-                className={`border px-4 py-2 text-xs uppercase tracking-widest transition-colors flex items-center gap-1 ${
+                className={`border-2 px-5 py-2 text-xs uppercase tracking-widest transition-all flex items-center gap-1 ${
                   triggerFlash
-                    ? "border-white bg-white text-black"
-                    : "border-white/60 text-white hover:border-white hover:bg-white/10"
-                } ${!connected ? "opacity-30 cursor-not-allowed" : ""}`}
+                    ? "border-white bg-white text-black scale-95"
+                    : connected
+                    ? "border-white bg-white/10 text-white hover:bg-white hover:text-black shadow-[0_0_15px_rgba(255,255,255,0.3)] animate-pulse-subtle"
+                    : "border-white/30 text-white/50 cursor-not-allowed"
+                }`}
               >
                 PLAY <span className="text-sm">→</span>
               </button>

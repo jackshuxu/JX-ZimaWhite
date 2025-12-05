@@ -81,5 +81,5 @@ export type ChordPlayedEvent = {
 /**
  * Available instruments for participants.
  */
-export const INSTRUMENTS = ["pad", "bass", "lead", "drone"] as const;
+export const INSTRUMENTS = ["pad", "harp", "lead"] as const;
 export type Instrument = (typeof INSTRUMENTS)[number];
