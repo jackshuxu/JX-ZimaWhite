@@ -104,7 +104,7 @@ export function useConductorSonification(
     try {
       if (!audioCtxRef.current) {
         audioCtxRef.current = new AudioContext();
-        
+
         // Create limiter to prevent clipping when many users play at once
         const limiter = audioCtxRef.current.createDynamicsCompressor();
         limiter.threshold.value = -6; // Start compressing at -6dB
@@ -114,13 +114,13 @@ export function useConductorSonification(
         limiter.release.value = 0.1; // Quick release
         limiter.connect(audioCtxRef.current.destination);
         limiterRef.current = limiter;
-        
+
         // Master gain feeds into limiter
         const master = audioCtxRef.current.createGain();
         master.gain.value = masterVolume;
         master.connect(limiter);
         masterGainRef.current = master;
-        
+
         console.log("[ConductorAudio] AudioContext created with limiter");
       }
 
