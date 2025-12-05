@@ -82,60 +82,56 @@ canvas {
 
 /* Bloom / Glow effects */
 .bloom-text {
-  text-shadow: 0 0 10px rgba(255, 255, 255, 0.8),
-    0 0 20px rgba(255, 255, 255, 0.6), 0 0 30px rgba(255, 255, 255, 0.4),
+  text-shadow:
+    0 0 10px rgba(255, 255, 255, 0.8),
+    0 0 20px rgba(255, 255, 255, 0.6),
+    0 0 30px rgba(255, 255, 255, 0.4),
     0 0 40px rgba(255, 255, 255, 0.2);
 }
 
 .bloom-text-subtle {
-  text-shadow: 0 0 5px rgba(255, 255, 255, 0.3),
+  text-shadow:
+    0 0 5px rgba(255, 255, 255, 0.3),
     0 0 10px rgba(255, 255, 255, 0.2);
 }
 
 .bloom-input {
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1),
-    0 0 20px rgba(255, 255, 255, 0.05), inset 0 0 10px rgba(255, 255, 255, 0.03);
+  box-shadow:
+    0 0 10px rgba(255, 255, 255, 0.1),
+    0 0 20px rgba(255, 255, 255, 0.05),
+    inset 0 0 10px rgba(255, 255, 255, 0.03);
   transition: box-shadow 0.3s ease;
 }
 
 .bloom-input:focus {
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.3),
-    0 0 30px rgba(255, 255, 255, 0.15), 0 0 45px rgba(255, 255, 255, 0.08),
+  box-shadow:
+    0 0 15px rgba(255, 255, 255, 0.3),
+    0 0 30px rgba(255, 255, 255, 0.15),
+    0 0 45px rgba(255, 255, 255, 0.08),
     inset 0 0 15px rgba(255, 255, 255, 0.05);
 }
 
 .bloom-button {
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.15),
+  box-shadow:
+    0 0 10px rgba(255, 255, 255, 0.15),
     0 0 20px rgba(255, 255, 255, 0.08);
   transition: box-shadow 0.3s ease, background 0.3s ease, color 0.3s ease;
 }
 
 .bloom-button:hover {
-  box-shadow: 0 0 20px rgba(255, 255, 255, 0.5),
-    0 0 40px rgba(255, 255, 255, 0.3), 0 0 60px rgba(255, 255, 255, 0.15);
+  box-shadow:
+    0 0 20px rgba(255, 255, 255, 0.5),
+    0 0 40px rgba(255, 255, 255, 0.3),
+    0 0 60px rgba(255, 255, 255, 0.15);
 }
 
 .bloom-line {
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.5),
+  box-shadow:
+    0 0 10px rgba(255, 255, 255, 0.5),
     0 0 20px rgba(255, 255, 255, 0.3);
 }
 
 .bloom-svg {
   filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5))
     drop-shadow(0 0 6px rgba(255, 255, 255, 0.3));
-}
-
-/* Subtle pulse animation for PLAY button */
-@keyframes pulse-subtle {
-  0%,
-  100% {
-    box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 25px rgba(255, 255, 255, 0.5);
-  }
-}
-
-.animate-pulse-subtle {
-  animation: pulse-subtle 2s ease-in-out infinite;
 }

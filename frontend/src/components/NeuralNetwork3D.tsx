@@ -223,18 +223,22 @@ export function NeuralNetwork3D({
 
           if (bloomModulation > 0.01 && activationBloom > 0.01) {
             // When sound is playing: bloom pulses dramatically with envelope + LFO
+            // Output layer (arp) gets 2x brighter bloom
+            const bloomMultiplier = isOutputLayer ? 2.0 : 1.0;
             const glowScale =
               baseSize *
-              (3 + activationBloom * 10 * (0.7 + bloomModulation * 0.6));
+              (3 + activationBloom * 10 * (0.7 + bloomModulation * 0.6) * bloomMultiplier);
             glow.scale.set(glowScale, glowScale, 1);
             const glowOpacity =
-              activationBloom * 0.9 * (0.4 + bloomModulation * 0.6);
+              Math.min(1, activationBloom * 0.9 * (0.4 + bloomModulation * 0.6) * bloomMultiplier);
             (glow.material as THREE.SpriteMaterial).opacity = glowOpacity;
           } else {
             // No sound: subtle static bloom based on activation only
-            const glowScale = baseSize * (2 + activationBloom * 5);
+            // Output layer (arp) gets 2x brighter bloom
+            const staticMultiplier = isOutputLayer ? 2.0 : 1.0;
+            const glowScale = baseSize * (2 + activationBloom * 5 * staticMultiplier);
             glow.scale.set(glowScale, glowScale, 1);
-            const glowOpacity = activationBloom * 0.4; // Slightly visible when no sound
+            const glowOpacity = Math.min(1, activationBloom * 0.4 * staticMultiplier); // Slightly visible when no sound
             (glow.material as THREE.SpriteMaterial).opacity = glowOpacity;
           }
           (glow.material as THREE.SpriteMaterial).color.copy(boostedColor);

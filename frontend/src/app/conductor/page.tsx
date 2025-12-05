@@ -17,7 +17,7 @@ const NGROK_SERVER = "https://mnist-orchestra.ngrok.io";
 
 // ASCII glitch characters
 const GLITCH_CHARS = "!@#$%^&*()_+-=[]{}|;:,.<>?/\\~`01█▓▒░▀▄▌▐";
-const TARGET_TEXT = "MNIST ORCHESTRA";
+const TARGET_TEXT = "ZIMA WHITE";
 
 /**
  * Glitch text component with ASCII scramble effect

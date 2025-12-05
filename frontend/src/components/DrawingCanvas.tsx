@@ -194,27 +194,27 @@ export function DrawingCanvas({
   return (
     <div className={hideButtons ? "" : "space-y-3"}>
       {!hideButtons && (
-        <div className="flex gap-2">
-          {(["pen", "erase"] as const).map((tool) => (
-            <button
-              key={tool}
-              onClick={() => setMode(tool)}
-              className={`border px-3 py-1 text-xs uppercase tracking-widest transition-colors ${
-                mode === tool
-                  ? "border-white bg-white text-black"
-                  : "border-white/40 text-white hover:border-white"
-              }`}
-            >
-              {tool === "pen" ? "DRAW" : "ERASE"}
-            </button>
-          ))}
+      <div className="flex gap-2">
+        {(["pen", "erase"] as const).map((tool) => (
           <button
-            onClick={clearCanvas}
-            className="border border-red-500/60 px-3 py-1 text-xs uppercase tracking-widest text-red-300 transition-colors hover:bg-red-500 hover:text-black"
+            key={tool}
+            onClick={() => setMode(tool)}
+            className={`border px-3 py-1 text-xs uppercase tracking-widest transition-colors ${
+              mode === tool
+                ? "border-white bg-white text-black"
+                : "border-white/40 text-white hover:border-white"
+            }`}
           >
-            CLEAR
+            {tool === "pen" ? "DRAW" : "ERASE"}
           </button>
-        </div>
+        ))}
+        <button
+          onClick={clearCanvas}
+          className="border border-red-500/60 px-3 py-1 text-xs uppercase tracking-widest text-red-300 transition-colors hover:bg-red-500 hover:text-black"
+        >
+          CLEAR
+        </button>
+      </div>
       )}
       <canvas
         ref={canvasRef}

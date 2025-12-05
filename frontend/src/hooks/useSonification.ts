@@ -154,8 +154,9 @@ export function useSonification(
 
   /**
    * Create a pad synth voice
+   * @param isBass - if true, adds sub-bass layer and lower filter for h1
    */
-  const createPadVoice = useCallback((freq: number, amp: number) => {
+  const createPadVoice = useCallback((freq: number, amp: number, isBass: boolean = false) => {
     const ctx = audioCtxRef.current;
     const master = masterGainRef.current;
     if (!ctx || !master || amp < 0.001) return;
@@ -166,14 +167,16 @@ export function useSonification(
     const release = 0.5;
     const duration = attack + sustain + release;
 
+    // Main oscillator
     const osc = ctx.createOscillator();
     osc.type = "sine";
     osc.frequency.value = freq;
 
+    // Filter - lower cutoff for bass
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 800;
-    filter.Q.value = 0.7;
+    filter.frequency.value = isBass ? 400 : 800;
+    filter.Q.value = isBass ? 1.2 : 0.7;
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0, now);
@@ -187,6 +190,37 @@ export function useSonification(
 
     osc.start(now);
     osc.stop(now + duration + 0.1);
+
+    // Sub-bass layer for h1 (one octave down)
+    if (isBass && freq > 60) {
+      const subOsc = ctx.createOscillator();
+      subOsc.type = "sine";
+      subOsc.frequency.value = freq / 2; // One octave down
+
+      const subFilter = ctx.createBiquadFilter();
+      subFilter.type = "lowpass";
+      subFilter.frequency.value = 200;
+      subFilter.Q.value = 0.5;
+
+      const subGain = ctx.createGain();
+      subGain.gain.setValueAtTime(0, now);
+      subGain.gain.linearRampToValueAtTime(amp * 0.8, now + attack);
+      subGain.gain.setValueAtTime(amp * 0.8, now + attack + sustain);
+      subGain.gain.linearRampToValueAtTime(0, now + duration);
+
+      subOsc.connect(subFilter);
+      subFilter.connect(subGain);
+      subGain.connect(master);
+
+      subOsc.start(now);
+      subOsc.stop(now + duration + 0.1);
+
+      subOsc.onended = () => {
+        subOsc.disconnect();
+        subFilter.disconnect();
+        subGain.disconnect();
+      };
+    }
 
     osc.onended = () => {
       osc.disconnect();
@@ -207,9 +241,10 @@ export function useSonification(
     const lfoRate = 0.15 + Math.random() * 0.7;
     const filterCenter = 400;
     const filterDepth = 200;
-    const attack = 0.001 + Math.random() * 0.004;
+    const attack = 0.005 + Math.random() * 0.01; // Slightly longer attack to avoid clicks
     const decay = 1.8;
-    const duration = attack + decay;
+    const release = 0.1; // Add release phase
+    const duration = attack + decay + release;
 
     const osc1 = ctx.createOscillator();
     osc1.type = "sine";
@@ -220,10 +255,10 @@ export function useSonification(
     osc2.frequency.value = freq * 2.01;
 
     const harmonicGain = ctx.createGain();
-    harmonicGain.gain.value = 0.4;
+    harmonicGain.gain.value = 0.3; // Reduced harmonic level
 
     const mixer = ctx.createGain();
-    mixer.gain.value = 1;
+    mixer.gain.value = 0.8; // Prevent clipping
 
     const lfo = ctx.createOscillator();
     lfo.type = "triangle";
@@ -235,15 +270,17 @@ export function useSonification(
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.value = filterCenter;
-    filter.Q.value = 5;
+    filter.Q.value = 2; // Reduced Q to prevent resonance artifacts
 
     lfo.connect(lfoGain);
     lfoGain.connect(filter.frequency);
 
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(amp * 1.5, now);
-    gain.gain.setValueAtTime(amp, now + attack);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    // Smoother envelope - avoid exponential to very small values
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(amp, now + attack);
+    gain.gain.setTargetAtTime(amp * 0.1, now + attack, decay * 0.3); // Exponential decay
+    gain.gain.linearRampToValueAtTime(0, now + duration); // Linear release to zero
 
     osc1.connect(mixer);
     osc2.connect(harmonicGain);
@@ -284,9 +321,10 @@ export function useSonification(
     const lfoRate = 0.2 + Math.random() * 0.4;
     const filterCenter = 800;
     const filterDepth = 300;
-    const attack = 0.005 + Math.random() * 0.01;
+    const attack = 0.01 + Math.random() * 0.01; // Slightly longer attack
     const decay = 1.2;
-    const duration = attack + decay;
+    const release = 0.08; // Add release phase
+    const duration = attack + decay + release;
 
     const osc1 = ctx.createOscillator();
     osc1.type = "sine";
@@ -297,10 +335,10 @@ export function useSonification(
     osc2.frequency.value = freq * 2.01;
 
     const harmonicGain = ctx.createGain();
-    harmonicGain.gain.value = 0.3;
+    harmonicGain.gain.value = 0.25; // Slightly reduced
 
     const mixer = ctx.createGain();
-    mixer.gain.value = 1;
+    mixer.gain.value = 0.8; // Prevent clipping
 
     const lfo = ctx.createOscillator();
     lfo.type = "triangle";
@@ -312,15 +350,17 @@ export function useSonification(
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.value = filterCenter;
-    filter.Q.value = 3;
+    filter.Q.value = 1.5; // Reduced Q to prevent resonance artifacts
 
     lfo.connect(lfoGain);
     lfoGain.connect(filter.frequency);
 
     const gain = ctx.createGain();
+    // Smoother envelope - avoid exponential to very small values
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(amp, now + attack);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    gain.gain.setTargetAtTime(amp * 0.05, now + attack, decay * 0.25); // Smooth decay
+    gain.gain.linearRampToValueAtTime(0, now + duration); // Linear release to zero
 
     osc1.connect(mixer);
     osc2.connect(harmonicGain);
@@ -385,18 +425,21 @@ export function useSonification(
     const h2Data = h2Ref.current;
     let triggered = false;
 
-    h1Data.forEach((v, i) => {
-      if (v > 0.01) {
-        const freq = midiToFreq(quantize(i));
-        createPadVoice(freq, v * 0.003 * masterVolume);
+    // Hidden layer 1: only bottom 32 neurons for sub-bass (reduces polyphony)
+    const h1Bottom32 = h1Data.slice(0, 32);
+    h1Bottom32.forEach((v, i) => {
+      if (v > 0.02) { // Slightly higher threshold to reduce voices
+        const freq = midiToFreq(quantize(i)); // Low MIDI notes for sub-bass
+        createPadVoice(freq, v * 0.008 * masterVolume, true); // Bass mode
         triggered = true;
       }
     });
 
+    // Hidden layer 2: regular pad, softer
     h2Data.forEach((v, i) => {
       if (v > 0.01) {
         const freq = midiToFreq(quantize(i + 36));
-        createPadVoice(freq, v * 0.0015 * masterVolume);
+        createPadVoice(freq, v * 0.0015 * masterVolume, false);
         triggered = true;
       }
     });
@@ -413,8 +456,10 @@ export function useSonification(
     const h1Data = h1Ref.current;
     let triggered = false;
 
-    h1Data.forEach((v, i) => {
-      if (v > 0.05) {
+    // Only bottom 32 neurons from h1 for lead bells (reduces polyphony)
+    const h1Bottom32 = h1Data.slice(0, 32);
+    h1Bottom32.forEach((v, i) => {
+      if (v > 0.06) { // Slightly higher threshold
         const freq = midiToFreq(quantize(i + 24));
         createLeadVoice(freq, v * 0.006 * masterVolume);
         triggered = true;
@@ -498,14 +543,25 @@ export function useSonification(
   }, [enabled, runArpRoutine]);
 
   /**
-   * Initialize audio context
+   * Initialize audio context with limiter to prevent clipping
    */
   const initAudio = useCallback(async () => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new AudioContext();
+      
+      // Create a dynamics compressor as a soft limiter
+      const compressor = audioCtxRef.current.createDynamicsCompressor();
+      compressor.threshold.value = -6; // Start compressing at -6dB
+      compressor.knee.value = 6; // Soft knee for smoother limiting
+      compressor.ratio.value = 8; // Strong compression ratio
+      compressor.attack.value = 0.003; // Fast attack
+      compressor.release.value = 0.1; // Medium release
+      
       const master = audioCtxRef.current.createGain();
-      master.gain.value = 1;
-      master.connect(audioCtxRef.current.destination);
+      master.gain.value = 0.9; // Slight headroom
+      
+      master.connect(compressor);
+      compressor.connect(audioCtxRef.current.destination);
       masterGainRef.current = master;
     }
 

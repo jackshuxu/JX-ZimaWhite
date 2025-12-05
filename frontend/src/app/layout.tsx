@@ -9,7 +9,7 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MNIST Orchestra",
+  title: "ZIMA WHITE",
   description: "a neural network sonification",
 };
 

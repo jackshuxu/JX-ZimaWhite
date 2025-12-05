@@ -11,7 +11,7 @@ export default function LandingPage() {
             NN / SONIFICATION
           </p>
           <h1 className="mt-4 text-4xl font-bold uppercase tracking-widest text-white md:text-6xl">
-            MNIST Orchestra
+            ZIMA WHITE
           </h1>
         </header>
 
