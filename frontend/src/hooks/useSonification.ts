@@ -172,8 +172,8 @@ export function useSonification(
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 2000;
-    filter.Q.value = 0.5;
+    filter.frequency.value = 800;
+    filter.Q.value = 0.7;
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0, now);
@@ -205,8 +205,8 @@ export function useSonification(
 
     const now = ctx.currentTime;
     const lfoRate = 0.15 + Math.random() * 0.7;
-    const filterCenter = 600;
-    const filterDepth = 350;
+    const filterCenter = 400;
+    const filterDepth = 200;
     const attack = 0.001 + Math.random() * 0.004;
     const decay = 1.8;
     const duration = attack + decay;
@@ -388,7 +388,7 @@ export function useSonification(
     h1Data.forEach((v, i) => {
       if (v > 0.01) {
         const freq = midiToFreq(quantize(i));
-        createPadVoice(freq, v * 0.001 * masterVolume);
+        createPadVoice(freq, v * 0.003 * masterVolume);
         triggered = true;
       }
     });
@@ -396,7 +396,7 @@ export function useSonification(
     h2Data.forEach((v, i) => {
       if (v > 0.01) {
         const freq = midiToFreq(quantize(i + 36));
-        createPadVoice(freq, v * 0.0005 * masterVolume);
+        createPadVoice(freq, v * 0.0015 * masterVolume);
         triggered = true;
       }
     });
@@ -416,7 +416,7 @@ export function useSonification(
     h1Data.forEach((v, i) => {
       if (v > 0.05) {
         const freq = midiToFreq(quantize(i + 24));
-        createLeadVoice(freq, v * 0.0025 * masterVolume);
+        createLeadVoice(freq, v * 0.006 * masterVolume);
         triggered = true;
       }
     });

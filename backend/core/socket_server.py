@@ -84,7 +84,7 @@ async def disconnect(sid):
     _last_trigger.pop(sid, None)
     changed = manager.leave(sid)
     if changed:
-        await sio.emit("crowd:snapshot", manager.snapshot(), room="crowd")
+        await sio.emit("crowd:snapshot", _snapshot_with_limit(), room="crowd")
 
 
 # -------------------------------------------------------------------- SOLO MODE
@@ -176,7 +176,7 @@ async def handle_canvas_update(sid, data):
     )
     if not updated:
         return
-    await sio.emit("crowd:snapshot", manager.snapshot(), room="crowd")
+    await sio.emit("crowd:snapshot", _snapshot_with_limit(), room="crowd")
 
 
 @sio.on("chord:trigger")

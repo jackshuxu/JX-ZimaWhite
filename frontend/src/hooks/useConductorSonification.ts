@@ -249,119 +249,104 @@ export function useConductorSonification(
   }, []);
 
   /**
-   * Create a harp/plucked string voice
-   * Uses multiple harmonics with fast attack and gentle decay
+   * Create a warm detuned saw synth voice
+   * Classic analog-style with multiple detuned oscillators
    */
-  const createHarpVoice = useCallback((freq: number, amp: number) => {
+  const createSynthVoice = useCallback((freq: number, amp: number) => {
     const ctx = audioCtxRef.current;
     const master = masterGainRef.current;
     if (!ctx || !master || amp < 0.001) return;
 
     const now = ctx.currentTime;
-    const attack = 0.003; // Very fast attack for pluck
-    const decay = 2.0; // Long, gentle decay
-    const duration = attack + decay;
+    const attack = 0.15; // Medium attack for smooth swell
+    const sustain = 0.8;
+    const release = 0.6;
+    const duration = attack + sustain + release;
 
-    // Fundamental
+    // Three detuned sawtooth oscillators for rich analog sound
     const osc1 = ctx.createOscillator();
-    osc1.type = "triangle"; // Softer than sine for harp
+    osc1.type = "sawtooth";
     osc1.frequency.value = freq;
 
-    // Octave harmonic (gentle)
     const osc2 = ctx.createOscillator();
-    osc2.type = "sine";
-    osc2.frequency.value = freq * 2;
+    osc2.type = "sawtooth";
+    osc2.frequency.value = freq * 1.005; // Slightly sharp
 
-    // Fifth harmonic (very subtle, adds shimmer)
     const osc3 = ctx.createOscillator();
-    osc3.type = "sine";
-    osc3.frequency.value = freq * 3;
+    osc3.type = "sawtooth";
+    osc3.frequency.value = freq * 0.995; // Slightly flat
 
-    // Slight detune on fundamental for richness
-    const osc4 = ctx.createOscillator();
-    osc4.type = "triangle";
-    osc4.frequency.value = freq * 1.002;
+    // Sub oscillator (one octave down, sine for warmth)
+    const oscSub = ctx.createOscillator();
+    oscSub.type = "sine";
+    oscSub.frequency.value = freq / 2;
 
-    // Harmonic gains (fundamental loudest, harmonics quieter)
-    const gain1 = ctx.createGain();
-    const gain2 = ctx.createGain();
-    const gain3 = ctx.createGain();
-    const gain4 = ctx.createGain();
+    // Individual gains for mixing
+    const gainSaw = ctx.createGain();
+    gainSaw.gain.value = 0.33; // Each saw at 1/3
 
-    // Envelope for each - pluck shape with exponential decay
-    gain1.gain.setValueAtTime(0, now);
-    gain1.gain.linearRampToValueAtTime(amp, now + attack);
-    gain1.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-    gain2.gain.setValueAtTime(0, now);
-    gain2.gain.linearRampToValueAtTime(amp * 0.3, now + attack);
-    gain2.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.6);
-
-    gain3.gain.setValueAtTime(0, now);
-    gain3.gain.linearRampToValueAtTime(amp * 0.15, now + attack);
-    gain3.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.4);
-
-    gain4.gain.setValueAtTime(0, now);
-    gain4.gain.linearRampToValueAtTime(amp * 0.4, now + attack);
-    gain4.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-    // High-pass filter to remove muddiness
-    const hpFilter = ctx.createBiquadFilter();
-    hpFilter.type = "highpass";
-    hpFilter.frequency.value = 80;
-    hpFilter.Q.value = 0.7;
-
-    // Warm low-pass that darkens quickly (muffled, less digital)
-    const lpFilter = ctx.createBiquadFilter();
-    lpFilter.type = "lowpass";
-    lpFilter.frequency.setValueAtTime(freq * 3, now);
-    lpFilter.frequency.exponentialRampToValueAtTime(freq * 0.8, now + 0.3);
-    lpFilter.Q.value = 0.5;
+    const gainSub = ctx.createGain();
+    gainSub.gain.value = 0.4; // Sub adds warmth
 
     // Mixer
     const mixer = ctx.createGain();
     mixer.gain.value = 1;
 
-    // Connect oscillators through their gains to mixer
-    osc1.connect(gain1);
-    osc2.connect(gain2);
-    osc3.connect(gain3);
-    osc4.connect(gain4);
+    // Warm low-pass filter with slight resonance
+    const lpFilter = ctx.createBiquadFilter();
+    lpFilter.type = "lowpass";
+    lpFilter.frequency.setValueAtTime(freq * 4, now);
+    lpFilter.frequency.linearRampToValueAtTime(freq * 2, now + attack);
+    lpFilter.frequency.exponentialRampToValueAtTime(
+      freq * 1.2,
+      now + duration * 0.7
+    );
+    lpFilter.Q.value = 1.5;
 
-    gain1.connect(mixer);
-    gain2.connect(mixer);
-    gain3.connect(mixer);
-    gain4.connect(mixer);
+    // Amplitude envelope (medium attack, sustain, release)
+    const ampEnv = ctx.createGain();
+    ampEnv.gain.setValueAtTime(0, now);
+    ampEnv.gain.linearRampToValueAtTime(amp, now + attack);
+    ampEnv.gain.setValueAtTime(amp * 0.8, now + attack + sustain);
+    ampEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
-    // Mixer through filters to master
-    mixer.connect(hpFilter);
-    hpFilter.connect(lpFilter);
-    lpFilter.connect(master);
+    // Connect saws through gain to mixer
+    osc1.connect(gainSaw);
+    osc2.connect(gainSaw);
+    osc3.connect(gainSaw);
+    gainSaw.connect(mixer);
+
+    // Connect sub through its gain to mixer
+    oscSub.connect(gainSub);
+    gainSub.connect(mixer);
+
+    // Mixer through filter and envelope to master
+    mixer.connect(lpFilter);
+    lpFilter.connect(ampEnv);
+    ampEnv.connect(master);
 
     // Start all oscillators
     osc1.start(now);
     osc2.start(now);
     osc3.start(now);
-    osc4.start(now);
+    oscSub.start(now);
 
     // Stop after duration
     osc1.stop(now + duration + 0.1);
     osc2.stop(now + duration + 0.1);
     osc3.stop(now + duration + 0.1);
-    osc4.stop(now + duration + 0.1);
+    oscSub.stop(now + duration + 0.1);
 
     osc1.onended = () => {
       osc1.disconnect();
       osc2.disconnect();
       osc3.disconnect();
-      osc4.disconnect();
-      gain1.disconnect();
-      gain2.disconnect();
-      gain3.disconnect();
-      gain4.disconnect();
+      oscSub.disconnect();
+      gainSaw.disconnect();
+      gainSub.disconnect();
       mixer.disconnect();
-      hpFilter.disconnect();
       lpFilter.disconnect();
+      ampEnv.disconnect();
     };
   }, []);
 
@@ -373,14 +358,14 @@ export function useConductorSonification(
       freq: number,
       amp: number,
       delayTime: number,
-      voice: "pad" | "bell" | "harp"
+      voice: "pad" | "bell" | "synth"
     ) => {
       const timeoutId = setTimeout(() => {
         scheduledNotesRef.current.delete(timeoutId);
         if (voice === "pad") {
           createPadVoice(freq, amp);
-        } else if (voice === "harp") {
-          createHarpVoice(freq, amp);
+        } else if (voice === "synth") {
+          createSynthVoice(freq, amp);
         } else {
           createSoftBellVoice(freq, amp);
         }
@@ -388,7 +373,7 @@ export function useConductorSonification(
 
       scheduledNotesRef.current.add(timeoutId);
     },
-    [createPadVoice, createSoftBellVoice, createHarpVoice]
+    [createPadVoice, createSoftBellVoice, createSynthVoice]
   );
 
   /**
@@ -434,8 +419,12 @@ export function useConductorSonification(
       }
 
       // Determine voice type based on instrument
-      const voiceType: "pad" | "harp" | "bell" =
-        instrument === "pad" ? "pad" : instrument === "harp" ? "harp" : "bell";
+      const voiceType: "pad" | "synth" | "bell" =
+        instrument === "pad"
+          ? "pad"
+          : instrument === "synth"
+          ? "synth"
+          : "bell";
 
       console.log(
         "[ConductorAudio] Playing:",
@@ -464,17 +453,13 @@ export function useConductorSonification(
           const amp = note.amp * 0.15 * masterVolume;
           createPadVoice(freq, amp);
         });
-      } else if (voiceType === "harp") {
-        // Play harp notes as gentle arpeggio
-        const arpPattern = shuffleArray(activeNotes);
-        const baseInterval = 0.08; // Slightly faster for harp
-        let accumulatedTime = 0;
-        arpPattern.forEach((note) => {
-          const midi = digitToMidi(note.digit, octave + 1); // Harp sounds nice an octave up
+      } else if (voiceType === "synth") {
+        // Play synth notes as chord (all together for that warm pad feel)
+        activeNotes.forEach((note) => {
+          const midi = digitToMidi(note.digit, octave);
           const freq = midiToFreq(midi);
-          const amp = note.amp * 0.12 * masterVolume;
-          scheduleNote(freq, amp, accumulatedTime, "harp");
-          accumulatedTime += baseInterval * rrand(0.8, 1.2);
+          const amp = note.amp * 0.1 * masterVolume;
+          createSynthVoice(freq, amp);
         });
       } else {
         // Play as arpeggiated bell sequence
@@ -495,7 +480,7 @@ export function useConductorSonification(
         });
       }
     },
-    [enabled, masterVolume, createPadVoice, scheduleNote]
+    [enabled, masterVolume, createPadVoice, createSynthVoice, scheduleNote]
   );
 
   /**
