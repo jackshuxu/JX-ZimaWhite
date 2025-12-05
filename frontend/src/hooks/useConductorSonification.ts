@@ -87,6 +87,7 @@ export function useConductorSonification(
   // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
+  const limiterRef = useRef<DynamicsCompressorNode | null>(null);
   const scheduledNotesRef = useRef<Set<ReturnType<typeof setTimeout>>>(
     new Set()
   );
@@ -103,11 +104,24 @@ export function useConductorSonification(
     try {
       if (!audioCtxRef.current) {
         audioCtxRef.current = new AudioContext();
+        
+        // Create limiter to prevent clipping when many users play at once
+        const limiter = audioCtxRef.current.createDynamicsCompressor();
+        limiter.threshold.value = -6; // Start compressing at -6dB
+        limiter.knee.value = 3; // Soft knee for natural sound
+        limiter.ratio.value = 12; // Heavy compression (acts as limiter)
+        limiter.attack.value = 0.003; // Fast attack to catch peaks
+        limiter.release.value = 0.1; // Quick release
+        limiter.connect(audioCtxRef.current.destination);
+        limiterRef.current = limiter;
+        
+        // Master gain feeds into limiter
         const master = audioCtxRef.current.createGain();
         master.gain.value = masterVolume;
-        master.connect(audioCtxRef.current.destination);
+        master.connect(limiter);
         masterGainRef.current = master;
-        console.log("[ConductorAudio] AudioContext created");
+        
+        console.log("[ConductorAudio] AudioContext created with limiter");
       }
 
       if (audioCtxRef.current.state === "suspended") {
@@ -502,6 +516,10 @@ export function useConductorSonification(
   useEffect(() => {
     return () => {
       clearScheduledNotes();
+      if (limiterRef.current) {
+        limiterRef.current.disconnect();
+        limiterRef.current = null;
+      }
       if (audioCtxRef.current) {
         audioCtxRef.current.close();
         audioCtxRef.current = null;
